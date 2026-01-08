@@ -1,1 +1,1 @@
-This is just an Starting Point.
+This is the starting point of our project
