@@ -34,6 +34,7 @@ DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
 USERS_FILE = DATA_DIR / "users.json"
 CLIENTS_FILE = DATA_DIR / "clients.json"
+LEGAL_TEAM_FILE = DATA_DIR / "legal_team.json"
 DOCUMENTS_FILE = DATA_DIR / "documents.json"
 UPLOADS_DIR = DATA_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
@@ -52,6 +53,14 @@ class LoginRequest(BaseModel):
     password: str
 
 class ClientCreate(BaseModel):
+    name: str
+    email: EmailStr
+
+class ClientCreate(BaseModel):
+    name: str
+    email: EmailStr
+
+class LegalTeamMemberCreate(BaseModel):
     name: str
     email: EmailStr
 
@@ -236,6 +245,119 @@ def create_client(client: ClientCreate, current_user: dict = Depends(verify_toke
             "email": client.email,
             "password": password
         }
+    }
+
+
+@app.post("/api/legal/create")
+def create_legal_team_member(member: LegalTeamMemberCreate, current_user: dict = Depends(verify_token)):
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can create legal team members")
+    
+    # Generate random password
+    password = secrets.token_urlsafe(12)
+    
+    # Create legal team user
+    users = load_json(USERS_FILE)
+    legal_team = load_json(LEGAL_TEAM_FILE)
+    
+    # Check if email already exists
+    if any(u["email"] == member.email for u in users):
+        raise HTTPException(status_code=400, detail="Email already exists")
+    
+    member_id = f"legal-{len(legal_team) + 1}"
+    
+    new_user = {
+        "id": member_id,
+        "name": member.name,
+        "email": member.email,
+        "password": password,
+        "role": "legal_team",
+        "created_at": datetime.now().isoformat()
+    }
+    
+    users.append(new_user)
+    save_json(USERS_FILE, users)
+    
+    # Save legal team info
+    new_member = {
+        "id": member_id,
+        "name": member.name,
+        "email": member.email,
+        "created_at": datetime.now().isoformat()
+    }
+    
+    legal_team.append(new_member)
+    save_json(LEGAL_TEAM_FILE, legal_team)
+    
+    # Send email with credentials
+    email_body = f"""
+    <html>
+    <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
+        <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px;">
+            <h2 style="color: #6366f1;">Welcome to LACCIS Legal Team</h2>
+            <p>Hello {member.name},</p>
+            <p>Your account has been created for the Legal Clause Classification Intelligence System.</p>
+            
+            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
+                <h3 style="margin-top: 0;">Your Login Credentials:</h3>
+                <p><strong>Email:</strong> {member.email}</p>
+                <p><strong>Password:</strong> {password}</p>
+            </div>
+            
+            <p>You can now log in to review contracts.</p>
+            <p><a href="http://localhost:5173" style="background: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin-top: 10px;">Login to LACCIS</a></p>
+            
+            <p style="color: #666; font-size: 12px; margin-top: 30px;">Please keep your credentials secure and do not share them with anyone.</p>
+        </div>
+    </body>
+    </html>
+    """
+    
+    email_sent = send_email(member.email, "LACCIS Legal Team Account", email_body)
+    
+    return {
+        "message": "Legal team member created successfully",
+        "member": new_member,
+        "email_sent": email_sent,
+        "credentials": {
+            "email": member.email,
+            "password": password
+        }
+    }
+
+@app.get("/api/legal/list")
+def list_legal_team(current_user: dict = Depends(verify_token)):
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can view legal team members")
+    
+    legal_team = load_json(LEGAL_TEAM_FILE)
+    return {"members": legal_team}
+
+@app.delete("/api/legal/delete/{member_id}")
+def delete_legal_team_member(member_id: str, current_user: dict = Depends(verify_token)):
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can delete legal team members")
+    
+    # Load data
+    legal_team = load_json(LEGAL_TEAM_FILE)
+    users = load_json(USERS_FILE)
+    
+    # Find member
+    member = next((m for m in legal_team if m["id"] == member_id), None)
+    if not member:
+        raise HTTPException(status_code=404, detail="Legal team member not found")
+    
+    # Remove from legal team list
+    legal_team = [m for m in legal_team if m["id"] != member_id]
+    save_json(LEGAL_TEAM_FILE, legal_team)
+    
+    # Remove user account
+    users = [u for u in users if u["id"] != member_id]
+    save_json(USERS_FILE, users)
+    
+    return {
+        "message": "Legal team member deleted successfully",
+        "member": member
     }
 
 @app.get("/api/clients/list")
