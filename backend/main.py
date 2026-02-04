@@ -84,12 +84,12 @@ class DocumentShare(BaseModel):
 # Helper functions
 def load_json(file_path):
     if file_path.exists():
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             return json.load(f)
     return []
 
 def save_json(file_path, data):
-    with open(file_path, 'w') as f:
+    with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2)
 
 def create_token(user_id: str, email: str, role: str):
@@ -141,6 +141,7 @@ def send_email(to_email: str, subject: str, body: str):
             "service_id": EMAILJS_SERVICE_ID,
             "template_id": EMAILJS_TEMPLATE_ID,
             "user_id": EMAILJS_PUBLIC_KEY,
+            "accessToken": EMAILJS_PRIVATE_KEY,  # Required for Strict Mode
             "template_params": {
                 "to_email": to_email,
                 "subject": subject,
@@ -274,7 +275,7 @@ def create_client(client: ClientCreate, current_user: dict = Depends(verify_toke
     # Load and customize email template
     try:
         template_path = Path("email_template.html")
-        with open(template_path, 'r') as f:
+        with open(template_path, 'r', encoding='utf-8') as f:
             email_body = f.read()
         
         # Replace placeholders
