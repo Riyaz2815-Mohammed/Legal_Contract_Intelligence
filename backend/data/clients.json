@@ -1,8 +1,26 @@
 [
   {
     "id": "client-1",
+<<<<<<< HEAD
     "name": "sARA",
     "email": "csaravanavel006@gamil.com",
     "created_at": "2026-02-03T19:04:30.927789"
+=======
+    "name": "resh",
+    "email": "resh1504@gmail.com",
+    "created_at": "2026-01-23T22:25:13.176671"
+  },
+  {
+    "id": "client-2",
+    "name": "Mohammed Riyaz ",
+    "email": "mdking786007@gmail.com",
+    "created_at": "2026-01-23T22:25:57.441641"
+  },
+  {
+    "id": "client-3",
+    "name": "Saravanavel",
+    "email": "csaravanavel006@gmail.com",
+    "created_at": "2026-02-03T19:02:38.631706"
+>>>>>>> 002e32d44c7a77596e71f02c893847f3b6976d09
   }
 ]
