@@ -1,1 +1,15 @@
-[]
+[
+  {
+    "id": "doc-1",
+    "filename": "Non Disclosure Agreement.docx",
+    "document_type": "NDA",
+    "user_id": "client-2",
+    "user_email": "vars.71772317156@gct.ac.in",
+    "user_role": "client",
+    "size": 71938,
+    "status": "pending",
+    "shared_with": [],
+    "uploaded_at": "2026-02-03T23:03:55.946972",
+    "file_path": "data\\uploads\\client-2_Non Disclosure Agreement.docx"
+  }
+]
