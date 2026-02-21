@@ -35,6 +35,7 @@ USERS_FILE = DATA_DIR / "users.json"
 CLIENTS_FILE = DATA_DIR / "clients.json"
 LEGAL_TEAM_FILE = DATA_DIR / "legal_team.json"
 DOCUMENTS_FILE = DATA_DIR / "documents.json"
+MESSAGES_FILE = DATA_DIR / "messages.json"
 UPLOADS_DIR = DATA_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
@@ -81,11 +82,29 @@ class DocumentShare(BaseModel):
     document_id: str
     share_with: str  # client_id or 'admin'
 
+class MessageSend(BaseModel):
+    recipient_id: str  # client_id or 'admin'
+    content: str
+
+class Message(BaseModel):
+    id: str
+    sender_id: str
+    recipient_id: str
+    content: str
+    timestamp: str
+
 # Helper functions
 def load_json(file_path):
     if file_path.exists():
-        with open(file_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+                if not content.strip():
+                    return []
+                return json.loads(content)
+        except Exception as e:
+            print(f"ERROR loading {file_path}: {e}")
+            return []
     return []
 
 def save_json(file_path, data):
@@ -401,9 +420,7 @@ def create_legal_team_member(member: LegalTeamMemberCreate, current_user: dict =
 
 @app.get("/api/legal/list")
 def list_legal_team(current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can view legal team members")
-    
+    # Allowed for both admin and client roles to facilitate chat
     legal_team = load_json(LEGAL_TEAM_FILE)
     return {"members": legal_team}
 
@@ -676,6 +693,60 @@ def document_stats(current_user: dict = Depends(verify_token)):
         "total_documents": len(documents),
         "total_size": sum(d["size"] for d in documents)
     }
+
+@app.post("/api/messages/send")
+def send_message(msg: MessageSend, current_user: dict = Depends(verify_token)):
+    try:
+        messages = load_json(MESSAGES_FILE)
+        
+        # Log IDs for debugging
+        print(f"📩 Sending message: from {current_user['user_id']} to {msg.recipient_id}")
+        
+        new_message = {
+            "id": f"msg-{len(messages) + 1}-{secrets.token_hex(4)}",
+            "sender_id": current_user["user_id"],
+            "recipient_id": msg.recipient_id,
+            "content": msg.content,
+            "timestamp": datetime.now().isoformat()
+        }
+        
+        messages.append(new_message)
+        save_json(MESSAGES_FILE, messages)
+        print(f"✅ Message saved to {MESSAGES_FILE}")
+        
+        return {"message": "Message sent", "data": new_message}
+    except Exception as e:
+        print(f"❌ Error in send_message: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/messages/list/{other_user_id}")
+def list_messages(other_user_id: str, current_user: dict = Depends(verify_token)):
+    try:
+        print(f"DEBUG: list_messages request - current_user: {current_user.get('user_id')}, other_user_id: {other_user_id}")
+        
+        messages = load_json(MESSAGES_FILE)
+        user_id = current_user.get("user_id")
+        
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid token: missing user_id")
+
+        # Strictly 1-on-1 filtering
+        filtered = [
+            m for m in messages
+            if (m.get("sender_id") == user_id and m.get("recipient_id") == other_user_id)
+            or (m.get("sender_id") == other_user_id and m.get("recipient_id") == user_id)
+        ]
+        
+        print(f"DEBUG: Found {len(filtered)} messages")
+        return {"messages": filtered}
+        
+        print(f"DEBUG: Found {len(filtered)} messages")
+        return {"messages": filtered}
+    except Exception as e:
+        import traceback
+        print(f"❌ CRITICAL ERROR in list_messages: {str(e)}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

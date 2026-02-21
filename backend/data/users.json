@@ -38,5 +38,13 @@
     "password": "LACCIS-D6EEAF",
     "role": "client",
     "created_at": "2026-02-16T17:33:07.056284"
+  },
+  {
+    "id": "legal-2",
+    "name": "riyaz",
+    "email": "anvarbhashaj1ace@gmail.com",
+    "password": "26iP95pb59tdW4tR",
+    "role": "legal_team",
+    "created_at": "2026-02-20T17:28:42.196401"
   }
 ]

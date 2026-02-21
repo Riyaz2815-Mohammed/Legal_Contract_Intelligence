@@ -1,0 +1,16 @@
+[
+  {
+    "id": "msg-1-548f01e3",
+    "sender_id": "client-2",
+    "recipient_id": "admin",
+    "content": "hi",
+    "timestamp": "2026-02-20T18:47:49.827372"
+  },
+  {
+    "id": "msg-2-ee674906",
+    "sender_id": "admin-1",
+    "recipient_id": "client-2",
+    "content": "hi ",
+    "timestamp": "2026-02-20T18:52:35.225124"
+  }
+]
