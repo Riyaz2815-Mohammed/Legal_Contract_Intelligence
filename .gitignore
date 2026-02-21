@@ -1,1 +1,10 @@
 api.txt
+backend/.env
+backend/.env.local
+backend/.env.production 
+backend/.env.test               
+frontend/.env   
+frontend/.env.local 
+frontend/.env.production 
+frontend/.env.test                                                              
+
