@@ -4,6 +4,8 @@ import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import LegalTeam from './pages/LegalTeam';
 import Upload from './pages/Upload';
+import ClientWorkspace from './pages/ClientWorkspace';
+import InviteClient from './pages/InviteClient';
 import './App.css';
 
 function App() {
@@ -55,6 +57,14 @@ function App() {
             }
           />
           <Route
+            path="/workspace/:clientId"
+            element={
+              isAuthenticated && user?.role === 'admin' ?
+                <ClientWorkspace user={user} onLogout={handleLogout} /> :
+                <Navigate to="/login" />
+            }
+          />
+          <Route
             path="/legal-team"
             element={
               isAuthenticated && user?.role === 'admin' ?
@@ -67,6 +77,14 @@ function App() {
             element={
               isAuthenticated ?
                 <Upload user={user} onLogout={handleLogout} /> :
+                <Navigate to="/login" />
+            }
+          />
+          <Route
+            path="/invite-client"
+            element={
+              isAuthenticated && user?.role === 'admin' ?
+                <InviteClient user={user} onLogout={handleLogout} /> :
                 <Navigate to="/login" />
             }
           />

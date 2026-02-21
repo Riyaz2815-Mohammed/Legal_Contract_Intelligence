@@ -1,22 +1,22 @@
 import { useState, useEffect } from 'react';
-import Navbar from '../components/Navbar';
+import Layout from '../layouts/Layout';
 import LegalTeamForm from '../components/LegalTeamForm';
 import LegalTeamTable from '../components/LegalTeamTable';
-import '../pages/Dashboard.css'; // Reuse dashboard styles
+import Modal from '../components/Modal';
+import './Dashboard.css';
 
 const API_URL = 'http://localhost:8000';
 
 function LegalTeam({ user, onLogout }) {
     const [members, setMembers] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [showInviteModal, setShowInviteModal] = useState(false);
 
     const loadMembers = async () => {
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${API_URL}/api/legal/list`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                headers: { 'Authorization': `Bearer ${token}` }
             });
 
             const data = await response.json();
@@ -36,20 +36,17 @@ function LegalTeam({ user, onLogout }) {
 
     const handleMemberCreated = () => {
         loadMembers();
+        setShowInviteModal(false);
     };
 
     const handleMemberDelete = async (member) => {
-        if (!window.confirm(`Are you sure you want to delete ${member.name}? This will remove their account.`)) {
-            return;
-        }
+        if (!window.confirm(`Are you sure you want to delete ${member.name}?`)) return;
 
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${API_URL}/api/legal/delete/${member.id}`, {
                 method: 'DELETE',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                headers: { 'Authorization': `Bearer ${token}` }
             });
 
             if (response.ok) {
@@ -60,28 +57,44 @@ function LegalTeam({ user, onLogout }) {
             }
         } catch (error) {
             console.error('Error deleting member:', error);
-            alert('Failed to delete member');
         }
     };
 
     return (
-        <div className="dashboard">
-            <Navbar user={user} onLogout={onLogout} title="Legal Team Management" />
-
-            <div className="grid">
-                <LegalTeamForm onMemberCreated={handleMemberCreated} />
-
-                <div className="card clients-card">
-                    <h3>
-                        <svg className="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 4 0 014 0z" />
+        <Layout user={user} onLogout={onLogout} pageTitle="Legal Team">
+            <div className="dashboard-content-v2">
+                <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <h2>Legal Team Management</h2>
+                        <p>Invite and manage your legal team members</p>
+                    </div>
+                    <button
+                        className="btn-create"
+                        onClick={() => setShowInviteModal(true)}
+                        style={{ padding: '0.875rem 1.5rem', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                    >
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                         </svg>
-                        Legal Team Members
-                    </h3>
+                        Add Team Member
+                    </button>
+                </div>
+
+                <div className="section-header" style={{ marginTop: '2.5rem' }}>
+                    <h3>Active Legal Team Members</h3>
+                </div>
+
+                <div className="table-wrapper">
                     <LegalTeamTable members={members} loading={loading} onDelete={handleMemberDelete} />
                 </div>
             </div>
-        </div>
+
+            <Modal isOpen={showInviteModal} onClose={() => setShowInviteModal(false)}>
+                <div style={{ padding: '0.5rem' }}>
+                    <LegalTeamForm onMemberCreated={handleMemberCreated} />
+                </div>
+            </Modal>
+        </Layout>
     );
 }
 

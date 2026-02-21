@@ -46,56 +46,60 @@ function ClientForm({ onClientCreated }) {
 
     return (
         <>
-            <div className="card">
-                <h3>
+            <div className="client-form-container">
+                <div className="form-header">
                     <svg className="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                     </svg>
-                    Send Client Credentials
-                </h3>
+                    <h3>Send Client Credentials</h3>
+                </div>
 
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
                         <label htmlFor="clientName">Client Name</label>
-                        <input
-                            type="text"
-                            id="clientName"
-                            className="form-control"
-                            placeholder="John Doe"
-                            value={name}
-                            onChange={(e) => setName(e.target.value)}
-                            required
-                        />
+                        <div className="form-input-wrapper">
+                            <input
+                                type="text"
+                                id="clientName"
+                                className="form-control"
+                                placeholder="Enter full name"
+                                value={name}
+                                onChange={(e) => setName(e.target.value)}
+                                required
+                            />
+                        </div>
                     </div>
 
                     <div className="form-group">
                         <label htmlFor="clientEmail">Client Email</label>
-                        <input
-                            type="email"
-                            id="clientEmail"
-                            className="form-control"
-                            placeholder="client@example.com"
-                            value={email}
-                            onChange={(e) => setEmail(e.target.value)}
-                            required
-                        />
+                        <div className="form-input-wrapper">
+                            <input
+                                type="email"
+                                id="clientEmail"
+                                className="form-control"
+                                placeholder="name@company.com"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                required
+                            />
+                        </div>
                     </div>
 
                     {alert && (
-                        <div className={`alert alert-${alert.type}`}>
+                        <div className={`form-alert ${alert.type}`}>
                             <span>{alert.type === 'success' ? '✓' : '⚠'}</span>
                             <span>{alert.message}</span>
                         </div>
                     )}
 
-                    <button type="submit" className="btn btn-success" disabled={loading}>
+                    <button type="submit" className="btn-submit" disabled={loading}>
                         {loading ? (
                             <>
-                                <span className="spinner"></span>
-                                <span>Sending...</span>
+                                <span className="spinner-small"></span>
+                                <span>Processing...</span>
                             </>
                         ) : (
-                            <span>Send Credentials via Email</span>
+                            <span>Invite Client</span>
                         )}
                     </button>
                 </form>

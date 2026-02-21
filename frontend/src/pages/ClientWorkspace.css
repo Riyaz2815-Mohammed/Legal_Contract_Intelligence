@@ -1,0 +1,173 @@
+.workspace-container {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+.workspace-header {
+    margin-bottom: 2rem;
+}
+
+.client-summary-card {
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0.02) 100%);
+    backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 20px;
+    padding: 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.client-overview {
+    display: flex;
+    align-items: center;
+    gap: 2rem;
+}
+
+.client-avatar-large {
+    width: 80px;
+    height: 80px;
+    background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+    border-radius: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 2rem;
+    font-weight: 700;
+    color: white;
+    box-shadow: 0 8px 16px rgba(99, 102, 241, 0.2);
+}
+
+.client-info h1 {
+    margin: 0;
+    font-size: 1.75rem;
+    color: white;
+}
+
+.client-info p {
+    margin: 0.25rem 0 1rem;
+    color: #94a3b8;
+}
+
+.client-badges {
+    display: flex;
+    gap: 0.75rem;
+    align-items: center;
+}
+
+.info-badge {
+    background: rgba(255, 255, 255, 0.05);
+    color: #64748b;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.75rem;
+    font-weight: 500;
+}
+
+.client-stats-mini {
+    display: flex;
+    gap: 3rem;
+}
+
+.mini-stat {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 600;
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: white;
+}
+
+.stat-value.text-warning {
+    color: #f59e0b;
+}
+
+.section-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1.5rem;
+}
+
+.section-actions h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: white;
+}
+
+.section-actions p {
+    margin: 0.25rem 0 0;
+    color: #64748b;
+    font-size: 0.875rem;
+}
+
+.btn-drive {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+    color: white;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-drive:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.workspace-card {
+    background: rgba(15, 17, 26, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 16px;
+    overflow: hidden;
+}
+
+.loading-workspace {
+    padding: 10rem;
+    text-align: center;
+    color: #94a3b8;
+    font-size: 1.25rem;
+}
+
+.log-empty {
+    padding: 4rem;
+    text-align: center;
+    color: #64748b;
+    font-size: 0.875rem;
+}
+
+@media (max-width: 900px) {
+    .client-summary-card {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 2rem;
+    }
+
+    .client-stats-mini {
+        width: 100%;
+        justify-content: flex-start;
+        border-top: 1px solid rgba(255, 255, 255, 0.05);
+        padding-top: 1.5rem;
+    }
+
+    .mini-stat {
+        align-items: flex-start;
+    }
+}

@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import Navbar from '../components/Navbar';
+import Layout from '../layouts/Layout';
 import UploadArea from '../components/UploadArea';
 import DocumentsTable from '../components/DocumentsTable';
 import Modal from '../components/Modal';
-import './Upload.css';
+import './Dashboard.css';
 
 const API_URL = 'http://localhost:8000';
 
@@ -12,16 +12,14 @@ function Upload({ user, onLogout }) {
     const [loading, setLoading] = useState(true);
     const [shareModal, setShareModal] = useState({ open: false, document: null });
     const [clients, setClients] = useState([]);
+    const [showUploadModal, setShowUploadModal] = useState(false);
 
     const loadDocuments = async () => {
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${API_URL}/api/documents/list`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                headers: { 'Authorization': `Bearer ${token}` }
             });
-
             const data = await response.json();
             if (response.ok) {
                 setDocuments(data.documents);
@@ -38,11 +36,8 @@ function Upload({ user, onLogout }) {
             try {
                 const token = localStorage.getItem('token');
                 const response = await fetch(`${API_URL}/api/clients/list`, {
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    }
+                    headers: { 'Authorization': `Bearer ${token}` }
                 });
-
                 const data = await response.json();
                 if (response.ok) {
                     setClients(data.clients);
@@ -60,6 +55,7 @@ function Upload({ user, onLogout }) {
 
     const handleUploadComplete = () => {
         loadDocuments();
+        setShowUploadModal(false);
     };
 
     const handleApprove = async (documentId) => {
@@ -67,14 +63,9 @@ function Upload({ user, onLogout }) {
             const token = localStorage.getItem('token');
             const response = await fetch(`${API_URL}/api/documents/approve/${documentId}`, {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                headers: { 'Authorization': `Bearer ${token}` }
             });
-
-            if (response.ok) {
-                loadDocuments();
-            }
+            if (response.ok) loadDocuments();
         } catch (error) {
             console.error('Error approving document:', error);
         }
@@ -98,7 +89,6 @@ function Upload({ user, onLogout }) {
                     share_with: clientId
                 })
             });
-
             if (response.ok) {
                 setShareModal({ open: false, document: null });
                 loadDocuments();
@@ -109,28 +99,32 @@ function Upload({ user, onLogout }) {
     };
 
     return (
-        <div className="upload-page">
-            <Navbar user={user} onLogout={onLogout} title={user.role === 'admin' ? 'Document Management' : 'Document Upload'} />
-
-            <div className="upload-container">
-                <div className="glass-container">
-                    <h1>{user.role === 'admin' ? 'Upload & Manage Documents' : 'Upload Contract Documents'}</h1>
-                    <p className="subtitle">
-                        {user.role === 'admin'
-                            ? 'Upload documents and share them with clients. Approve client NDAs to enable further uploads.'
-                            : 'Upload your legal contract documents. NDA must be uploaded and approved first before uploading other documents.'}
-                    </p>
-
-                    <UploadArea onUploadComplete={handleUploadComplete} />
+        <Layout user={user} onLogout={onLogout} pageTitle="Documents">
+            <div className="dashboard-content-v2">
+                <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <h2>{user.role === 'admin' ? 'Document Management' : 'Document Upload'}</h2>
+                        <p>{user.role === 'admin'
+                            ? 'Manage all legal records and share them with clients.'
+                            : 'Upload and track your contract documents.'}</p>
+                    </div>
+                    <button
+                        className="btn-create"
+                        onClick={() => setShowUploadModal(true)}
+                        style={{ padding: '0.875rem 1.5rem', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                    >
+                        <svg width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        Upload Document
+                    </button>
                 </div>
 
-                <div className="glass-container">
-                    <h3>
-                        <svg className="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        {user.role === 'admin' ? 'All Documents' : 'Your Uploaded Documents'}
-                    </h3>
+                <div className="section-header" style={{ marginTop: '2.5rem' }}>
+                    <h3>{user.role === 'admin' ? 'Repository' : 'Your History'}</h3>
+                </div>
+
+                <div className="table-wrapper">
                     <DocumentsTable
                         documents={documents}
                         loading={loading}
@@ -141,23 +135,34 @@ function Upload({ user, onLogout }) {
                 </div>
             </div>
 
-            {/* Share Modal */}
-            <Modal isOpen={shareModal.open} onClose={() => setShareModal({ open: false, document: null })}>
-                <h3>Share Document</h3>
-                <p style={{ color: 'var(--text-muted)', marginBottom: '1.5rem' }}>
-                    Share "{shareModal.document?.filename}" with:
-                </p>
+            <Modal isOpen={showUploadModal} onClose={() => setShowUploadModal(false)}>
+                <div className="client-form-container" style={{ minWidth: '400px' }}>
+                    <div className="form-header">
+                        <svg className="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        </svg>
+                        <h3>Quick Upload</h3>
+                    </div>
+                    <UploadArea onUploadComplete={handleUploadComplete} />
+                </div>
+            </Modal>
 
+            <Modal isOpen={shareModal.open} onClose={() => setShareModal({ open: false, document: null })}>
+                <h3 style={{ color: 'white', marginBottom: '1rem' }}>Share Document</h3>
+                <p style={{ color: '#94a3b8', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
+                    Send "{shareModal.document?.filename}" to:
+                </p>
                 {user.role === 'admin' && (
-                    <div>
-                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>
-                            Select Client:
+                    <div className="form-group">
+                        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#94a3b8', fontSize: '0.8125rem' }}>
+                            Target Client
                         </label>
                         <select
                             className="form-control"
+                            style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: 'white' }}
                             onChange={(e) => e.target.value && handleShareSubmit(e.target.value)}
                         >
-                            <option value="">Choose a client...</option>
+                            <option value="">Select a client...</option>
                             {clients.map(client => (
                                 <option key={client.id} value={client.id}>
                                     {client.name} ({client.email})
@@ -167,7 +172,7 @@ function Upload({ user, onLogout }) {
                     </div>
                 )}
             </Modal>
-        </div>
+        </Layout>
     );
 }
 

@@ -1,39 +1,40 @@
 import { useState, useEffect } from 'react';
-import Navbar from '../components/Navbar';
+import Layout from '../layouts/Layout';
 import DocumentsTable from '../components/DocumentsTable';
 import UploadArea from '../components/UploadArea';
 import Modal from '../components/Modal';
-import '../pages/Dashboard.css'; // Reuse dashboard styles
-import '../pages/Upload.css'; // Reuse upload styles for specific elements if needed
+import WorkspaceTabs from '../components/WorkspaceTabs';
+import ChatBox from '../components/ChatBox';
+import StatusBadge from '../components/StatusBadge';
+import './Dashboard.css';
+import './ClientWorkspace.css';
 
 const API_URL = 'http://localhost:8000';
 
 function ClientDashboard({ user, onLogout }) {
     const [documents, setDocuments] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [activeTab, setActiveTab] = useState('documents');
     const [showUploadModal, setShowUploadModal] = useState(false);
-    const [uploadType, setUploadType] = useState('Others'); // 'Redlined' or 'Others'
-    const [acceptLoading, setAcceptLoading] = useState(false);
-    const [showAcceptSuccess, setShowAcceptSuccess] = useState(false);
+    const [uploadType, setUploadType] = useState('Others');
+    const [legalTeam, setLegalTeam] = useState([]);
+    const [selectedRecipient, setSelectedRecipient] = useState(null);
 
-    // Mock Assigned Contract Data
+    // Mock Assigned Contract Data for demo
     const assignedContract = {
         title: "Service Agreement - Q1 2026",
-        status: "Assigned",
-        driveLink: "https://docs.google.com/document/u/0/?tgif=d", // Placeholder Google Drive Link
-        assignedBy: "Legal Team",
-        date: new Date().toLocaleDateString()
+        status: "Pending",
+        driveLink: "https://docs.google.com/document/u/0/?tgif=d",
+        assignedBy: "Legal Team Admin",
+        date: "2026-02-20"
     };
 
     const loadDocuments = async () => {
         try {
             const token = localStorage.getItem('token');
             const response = await fetch(`${API_URL}/api/documents/list`, {
-                headers: {
-                    'Authorization': `Bearer ${token}`
-                }
+                headers: { 'Authorization': `Bearer ${token}` }
             });
-
             const data = await response.json();
             if (response.ok) {
                 setDocuments(data.documents);
@@ -45,18 +46,28 @@ function ClientDashboard({ user, onLogout }) {
         }
     };
 
+    const loadLegalTeam = async () => {
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_URL}/api/legal/list`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            if (response.ok) {
+                setLegalTeam(data.members || []);
+                if (data.members && data.members.length > 0) {
+                    setSelectedRecipient(data.members[0]);
+                }
+            }
+        } catch (error) {
+            console.error('Error loading legal team:', error);
+        }
+    };
+
     useEffect(() => {
         loadDocuments();
+        loadLegalTeam();
     }, []);
-
-    const handleAcceptContract = () => {
-        setAcceptLoading(true);
-        // Simulate API call
-        setTimeout(() => {
-            setAcceptLoading(false);
-            setShowAcceptSuccess(true);
-        }, 1500);
-    };
 
     const handleUploadClick = (type) => {
         setUploadType(type);
@@ -66,110 +77,146 @@ function ClientDashboard({ user, onLogout }) {
     const handleUploadComplete = () => {
         setShowUploadModal(false);
         loadDocuments();
+        setActiveTab('documents');
     };
 
-    // Reuse existing handleApprove/Share if needed, or pass empty functions if not applicable for client
-    const handleApprove = async () => { };
-    const handleShare = () => { };
-
     return (
-        <div className="dashboard">
-            <Navbar user={user} onLogout={onLogout} title="Client Portal" />
-
-            <div className="grid">
-                {/* Assigned Contract Card */}
-                <div className="card" style={{ gridColumn: '1 / -1' }}>
-                    <h3>
-                        <svg className="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        Assigned Contract
-                    </h3>
-
-                    <div className="assigned-contract-content" style={{ padding: '1rem', background: 'rgba(255,255,255,0.05)', borderRadius: '8px', marginTop: '1rem' }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
-                            <div>
-                                <h4 style={{ margin: 0, color: 'var(--text)' }}>{assignedContract.title}</h4>
-                                <p style={{ margin: '0.5rem 0 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                                    Assigned by {assignedContract.assignedBy} on {assignedContract.date}
-                                </p>
-                            </div>
-
-                            <div style={{ display: 'flex', gap: '1rem' }}>
-                                <a
-                                    href={assignedContract.driveLink}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="btn btn-secondary"
-                                    style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none' }}
-                                >
-                                    <svg style={{ width: '20px', height: '20px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                                    </svg>
-                                    View Drive Link
-                                </a>
-
-                                <button
-                                    className="btn btn-success"
-                                    onClick={handleAcceptContract}
-                                    disabled={acceptLoading}
-                                >
-                                    {acceptLoading ? 'Accepting...' : 'Accept Contract'}
-                                </button>
-                            </div>
-                        </div>
-
-                        <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--glass-border)', paddingTop: '1.5rem' }}>
-                            <p style={{ color: 'var(--text-muted)', marginBottom: '1rem', fontSize: '0.9rem' }}>
-                                Need to make changes? Upload a redlined version or your own contract draft.
-                            </p>
-                            <div style={{ display: 'flex', gap: '1rem' }}>
-                                <button className="btn btn-primary" onClick={() => handleUploadClick('Redlined')}>
-                                    Upload Redlined Contract
-                                </button>
-                                <button className="btn btn-secondary" onClick={() => handleUploadClick('Others')}>
-                                    Upload Own Contract
-                                </button>
+        <Layout user={user} onLogout={onLogout} pageTitle="Client Portal">
+            <div className="workspace-container">
+                <div className="workspace-header">
+                    <div className="client-summary-card">
+                        <div className="client-overview">
+                            <div className="client-avatar-large">{user.name.charAt(0)}</div>
+                            <div className="client-info">
+                                <h1>Welcome, {user.name}</h1>
+                                <p>Client Portal - Manage your legal documents and communication</p>
+                                <div className="client-badges">
+                                    <StatusBadge status="Active User" />
+                                    <span className="info-badge">Portal Access: Enabled</span>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                {/* Documents History Log */}
-                <div className="card" style={{ gridColumn: '1 / -1' }}>
-                    <h3>
-                        <svg className="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                        </svg>
-                        Document History
-                    </h3>
-                    <DocumentsTable
-                        documents={documents}
-                        loading={loading}
-                        onApprove={handleApprove}
-                        onShare={handleShare}
-                        currentUser={user}
-                    />
+                <div className="workspace-main">
+                    <WorkspaceTabs activeTab={activeTab} onTabChange={setActiveTab} />
+
+                    <div className="tab-content">
+                        {activeTab === 'documents' && (
+                            <div className="documents-section">
+                                <div className="section-actions">
+                                    <h2>Your Documents</h2>
+                                    <div className="header-buttons">
+                                        <button className="btn-workspace" onClick={() => handleUploadClick('Redlined')}>
+                                            Upload Redlined
+                                        </button>
+                                        <button className="btn-workspace" onClick={() => handleUploadClick('Others')}>
+                                            Upload New
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="assigned-contract-v2 workspace-card" style={{ marginBottom: '2rem', padding: '1.5rem' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                        <div>
+                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
+                                                <h3 style={{ margin: 0, color: 'white' }}>{assignedContract.title}</h3>
+                                                <StatusBadge status={assignedContract.status} />
+                                            </div>
+                                            <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.875rem' }}>
+                                                Assigned by {assignedContract.assignedBy} on {assignedContract.date}
+                                            </p>
+                                        </div>
+                                        <button className="btn-drive" onClick={() => window.open(assignedContract.driveLink, '_blank')}>
+                                            View in Google Drive
+                                        </button>
+                                    </div>
+                                </div>
+
+                                <div className="workspace-card">
+                                    <DocumentsTable
+                                        documents={documents}
+                                        loading={loading}
+                                        currentUser={user}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'chat' && (
+                            <div className="chat-section">
+                                <div className="section-actions">
+                                    <h2>Legal Support Chat</h2>
+                                    <p>Direct communication with your legal advisors</p>
+                                </div>
+                                <div className="chat-interface-v2">
+                                    <div className="contacts-sidebar">
+                                        <div className="sidebar-header">
+                                            <h3>Contacts</h3>
+                                        </div>
+                                        <div className="contacts-list">
+                                            {legalTeam.map((member) => (
+                                                <div
+                                                    key={member.id}
+                                                    className={`contact-item ${selectedRecipient?.id === member.id ? 'active' : ''}`}
+                                                    onClick={() => setSelectedRecipient(member)}
+                                                >
+                                                    <div className="contact-avatar">{member.name.charAt(0)}</div>
+                                                    <div className="contact-info">
+                                                        <div className="contact-name">{member.name}</div>
+                                                        <div className="contact-role">Legal Team</div>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                            {legalTeam.length === 0 && (
+                                                <div className="contact-empty">No contacts found</div>
+                                            )}
+                                        </div>
+                                    </div>
+                                    <div className="chat-main">
+                                        {selectedRecipient ? (
+                                            <>
+                                                <div className="chat-recipient-header">
+                                                    <div className="recipient-avatar">{selectedRecipient.name.charAt(0)}</div>
+                                                    <div className="recipient-details">
+                                                        <h4>{selectedRecipient.name}</h4>
+                                                        <span>Direct Message</span>
+                                                    </div>
+                                                </div>
+                                                <ChatBox currentUser={user} recipientId={selectedRecipient.id} />
+                                            </>
+                                        ) : (
+                                            <div className="chat-placeholder">
+                                                <div className="placeholder-icon">💬</div>
+                                                <p>Select a contact to start messaging</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'activity' && (
+                            <div className="activity-section">
+                                <div className="section-actions">
+                                    <h2>Activity Timeline</h2>
+                                    <p>Track history of uploads and status changes</p>
+                                </div>
+                                <div className="activity-log workspace-card">
+                                    <div className="log-empty">Activity history will appear here.</div>
+                                </div>
+                            </div>
+                        )}
+                    </div>
                 </div>
             </div>
 
-            {/* Upload Modal */}
             <Modal isOpen={showUploadModal} onClose={() => setShowUploadModal(false)}>
-                <h3>Upload {uploadType === 'Redlined' ? 'Redlined Contract' : 'Document'}</h3>
-                <div style={{ marginTop: '1rem' }}>
-                    <UploadArea onUploadComplete={handleUploadComplete} documentType={uploadType} />
-                </div>
+                <h2 style={{ color: 'white', marginBottom: '1.5rem' }}>Upload {uploadType}</h2>
+                <UploadArea onUploadComplete={handleUploadComplete} documentType={uploadType} />
             </Modal>
-
-            {/* Success Modal */}
-            <Modal isOpen={showAcceptSuccess} onClose={() => setShowAcceptSuccess(false)}>
-                <h3>Contract Accepted!</h3>
-                <div className="alert alert-success">
-                    <span>✓</span>
-                    <span>The Legal Team has been notified of your acceptance.</span>
-                </div>
-            </Modal>
-        </div>
+        </Layout>
     );
 }
 
