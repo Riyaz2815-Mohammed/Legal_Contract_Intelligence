@@ -549,17 +549,8 @@ async def upload_document(
     shared_with: Optional[str] = None,
     current_user: dict = Depends(verify_token)
 ):
-    # Check NDA requirement for clients (Relaxed for RA and Others)
-    if current_user["role"] == "client":
-        documents = load_json(DOCUMENTS_FILE)
-        user_docs = [d for d in documents if d["user_id"] == current_user["user_id"]]
-        has_nda = any(d["document_type"] == "NDA" and d["status"] == "approved" for d in user_docs)
-        
-        # Allow NDA, RA, NA regardless of existing NDA status
-        allowed_without_nda = ["NDA", "RA", "NA", "Others"]
-        if not has_nda and document_type not in allowed_without_nda:
-            # We'll just log a warning for now but let it through to "not block" the user demo
-            print(f"⚠️ User {current_user['user_id']} uploading {document_type} without approved NDA")
+    # All document types are allowed without restriction
+    print(f"📄 User {current_user['user_id']} uploading {document_type}")
     
     # Save file
     file_name = f"{current_user['user_id']}_{file.filename}"
@@ -899,4 +890,4 @@ def list_messages(other_user_id: str, current_user: dict = Depends(verify_token)
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
