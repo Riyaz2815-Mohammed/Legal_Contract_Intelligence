@@ -1,21 +1,17 @@
 [
   {
     "id": "doc-1",
-    "filename": "Non Disclosure Agreement.docx",
-    "document_type": "NDA",
-    "user_id": "client-2",
-    "user_email": "vars.71772317156@gct.ac.in",
+    "filename": "mutualnda.pdf",
+    "document_type": "Others",
+    "user_id": "client-adb2f928",
+    "user_email": "saravanavel.1136@gmail.com",
     "user_role": "client",
-    "size": 71938,
-    "status": "approved",
+    "size": 98915,
+    "status": "uploaded",
     "shared_with": [],
-    "uploaded_at": "2026-02-03T23:03:55.946972",
-    "file_path": "data\\uploads\\client-2_Non Disclosure Agreement.docx",
-    "s3_key": "client-2_Non Disclosure Agreement.docx",
-    "s3_url": "https://laccis.s3.amazonaws.com/client-2_Non Disclosure Agreement.docx",
-    "approved_at": "2026-02-21T16:27:06.917371",
-    "approved_by": "admin-1",
-    "rejected_at": "2026-02-21T16:26:59.449107",
-    "rejected_by": "admin-1"
+    "uploaded_at": "2026-02-23T19:05:57.801797",
+    "file_path": "data\\uploads\\client-adb2f928_mutualnda.pdf",
+    "s3_url": "https://laccis.s3.eu-north-1.amazonaws.com/client-adb2f928_mutualnda.pdf",
+    "s3_key": "client-adb2f928_mutualnda.pdf"
   }
 ]

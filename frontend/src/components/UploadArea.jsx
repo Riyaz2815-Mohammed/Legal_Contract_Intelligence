@@ -6,8 +6,18 @@ const API_URL = 'http://localhost:8000';
 function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
     const [files, setFiles] = useState([]);
     const [dragOver, setDragOver] = useState(false);
-    const [documentType, setDocumentType] = useState(externalDocumentType || 'NDA');
+    const [documentType, setDocumentType] = useState(externalDocumentType || '');
+    const [step, setStep] = useState(externalDocumentType ? 2 : 1);
     const [error, setError] = useState('');
+
+    const handleStep1Complete = () => {
+        if (!documentType) {
+            setError('Please select a document type first');
+            return;
+        }
+        setError('');
+        setStep(2);
+    };
 
     const handleDragOver = (e) => {
         e.preventDefault();
@@ -66,6 +76,7 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                 });
             }, 100);
 
+            // If NDA is chosen, backend will trigger extraction automatically
             const response = await fetch(
                 `${API_URL}/api/documents/upload?document_type=${fileObj.documentType}`,
                 {
@@ -123,8 +134,10 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
     const getDocumentTypeColor = (type) => {
         const colors = {
             'NDA': '#ef4444',
+            'RA': '#8b5cf6',
             'MSA': '#3b82f6',
             'SOW': '#10b981',
+            'NA': '#64748b',
             'Redlined': '#f59e0b',
             'Others': '#6366f1'
         };
@@ -132,30 +145,86 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
     };
 
     return (
-        <>
-            {!externalDocumentType && (
-                <div className="document-type-selector">
-                    <label htmlFor="documentType">Document Type:</label>
-                    <select
-                        id="documentType"
-                        value={documentType}
-                        onChange={(e) => setDocumentType(e.target.value)}
-                        className="form-control"
-                        style={{ marginTop: '0.5rem' }}
+        <div className="upload-workflow">
+            {step === 1 && (
+                <div className="workflow-step step-1">
+                    <div className="document-type-selector">
+                        <label htmlFor="documentType" style={{ fontSize: '1.1rem', marginBottom: '1rem' }}>
+                            Step 1: Select Document Type
+                        </label>
+                        <select
+                            id="documentType"
+                            value={documentType}
+                            onChange={(e) => setDocumentType(e.target.value)}
+                            className="form-control"
+                            style={{ padding: '1rem', fontSize: '1rem', fontWeight: '600', border: '2px solid #e2e8f0' }}
+                        >
+                            <option value="">-- Choose Type --</option>
+                            <option value="NDA">NDA (Non-Disclosure Agreement)</option>
+                            <option value="MSA">MSA (Master Service Agreement)</option>
+                            <option value="SOW">SOW (Statement of Work)</option>
+                            <option value="RA">RA (Registration Agreement)</option>
+                            <option value="NA">NA (Not Specified / Other)</option>
+                        </select>
+                        <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '1rem' }}>
+                            {documentType === 'NDA' && '✨ Automated extraction and classification will be performed for NDAs.'}
+                            {documentType === 'RA' && 'Registration Agreement - Document storage.'}
+                            {documentType === 'MSA' && 'Master Service Agreement - Major legal contract.'}
+                            {documentType === 'SOW' && 'Statement of Work - Project details and deliverables.'}
+                            {documentType === 'NA' && 'Other miscellaneous legal documents.'}
+                        </p>
+                        <button
+                            className="btn btn-primary"
+                            style={{ marginTop: '1.5rem', width: '100%', padding: '1rem' }}
+                            onClick={handleStep1Complete}
+                            disabled={!documentType}
+                        >
+                            Next: Select File
+                        </button>
+                    </div>
+                </div>
+            )}
+
+            {step === 2 && (
+                <div className="workflow-step step-2">
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                        <h4 style={{ margin: 0 }}>
+                            Step 2: Upload
+                            <span style={{ color: getDocumentTypeColor(documentType), marginLeft: '0.5rem' }}>
+                                {documentType}
+                            </span>
+                        </h4>
+                        {!externalDocumentType && (
+                            <button className="btn-text" onClick={() => setStep(1)} style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                                Change Type
+                            </button>
+                        )}
+                    </div>
+
+                    <div
+                        className={`upload-area ${dragOver ? 'dragover' : ''}`}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
                     >
-                        <option value="NDA">NDA (Non-Disclosure Agreement)</option>
-                        <option value="MSA">MSA (Master Service Agreement)</option>
-                        <option value="SOW">SOW (Statement of Work)</option>
-                        <option value="Redlined">Redlined Document</option>
-                        <option value="Others">Others</option>
-                    </select>
-                    <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '0.5rem' }}>
-                        {documentType === 'NDA' && '⚠️ NDA must be uploaded and approved first'}
-                        {documentType === 'MSA' && 'Master Service Agreement - Requires approved NDA'}
-                        {documentType === 'SOW' && 'Statement of Work - Requires approved NDA'}
-                        {documentType === 'Redlined' && 'Document with tracked changes'}
-                        {documentType === 'Others' && 'Other legal documents'}
-                    </p>
+                        <div className="upload-icon">📄</div>
+                        <h3>Drag & Drop Files Here</h3>
+                        <p style={{ color: 'var(--text-muted)', margin: '1rem 0' }}>or</p>
+                        <input
+                            type="file"
+                            id="fileInput"
+                            multiple
+                            accept=".pdf,.doc,.docx,.txt"
+                            style={{ display: 'none' }}
+                            onChange={handleFileInput}
+                        />
+                        <button
+                            className="btn btn-primary"
+                            onClick={() => document.getElementById('fileInput').click()}
+                        >
+                            Browse Files
+                        </button>
+                    </div>
                 </div>
             )}
 
@@ -165,35 +234,6 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                     <span>{error}</span>
                 </div>
             )}
-
-            <div
-                className={`upload-area ${dragOver ? 'dragover' : ''}`}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                style={{ marginTop: '1.5rem' }}
-            >
-                <div className="upload-icon">📄</div>
-                <h3>Drag & Drop Files Here</h3>
-                <p style={{ color: 'var(--text-muted)', margin: '1rem 0' }}>or</p>
-                <input
-                    type="file"
-                    id="fileInput"
-                    multiple
-                    accept=".pdf,.doc,.docx,.txt"
-                    style={{ display: 'none' }}
-                    onChange={handleFileInput}
-                />
-                <button
-                    className="btn btn-primary"
-                    onClick={() => document.getElementById('fileInput').click()}
-                >
-                    Browse Files
-                </button>
-                <p style={{ color: 'var(--text-muted)', marginTop: '1rem', fontSize: '0.875rem' }}>
-                    Supported formats: PDF, DOC, DOCX, TXT
-                </p>
-            </div>
 
             {files.length > 0 && (
                 <div className="file-list">
@@ -235,7 +275,7 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                     ))}
                 </div>
             )}
-        </>
+        </div>
     );
 }
 

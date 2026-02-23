@@ -20,14 +20,6 @@ function ClientDashboard({ user, onLogout }) {
     const [legalTeam, setLegalTeam] = useState([]);
     const [selectedRecipient, setSelectedRecipient] = useState(null);
 
-    // Mock Assigned Contract Data for demo
-    const assignedContract = {
-        title: "Service Agreement - Q1 2026",
-        status: "Pending",
-        driveLink: "https://docs.google.com/document/u/0/?tgif=d",
-        assignedBy: "Legal Team Admin",
-        date: "2026-02-20"
-    };
 
     const loadDocuments = async () => {
         try {
@@ -113,23 +105,6 @@ function ClientDashboard({ user, onLogout }) {
                                         </button>
                                         <button className="btn-workspace" onClick={() => handleUploadClick('Others')}>
                                             Upload New
-                                        </button>
-                                    </div>
-                                </div>
-
-                                <div className="assigned-contract-v2 workspace-card" style={{ marginBottom: '2rem', padding: '1.5rem' }}>
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                        <div>
-                                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-                                                <h3 style={{ margin: 0, color: 'white' }}>{assignedContract.title}</h3>
-                                                <StatusBadge status={assignedContract.status} />
-                                            </div>
-                                            <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.875rem' }}>
-                                                Assigned by {assignedContract.assignedBy} on {assignedContract.date}
-                                            </p>
-                                        </div>
-                                        <button className="btn-drive" onClick={() => window.open(assignedContract.driveLink, '_blank')}>
-                                            View in Google Drive
                                         </button>
                                     </div>
                                 </div>
