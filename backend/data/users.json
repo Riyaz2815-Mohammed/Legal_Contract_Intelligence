@@ -8,36 +8,12 @@
     "created_at": "2026-01-23T18:58:20.235207"
   },
   {
-    "id": "client-2",
-    "name": "Varshini",
-    "email": "rameshvarshini2005@gmail.com",
-    "password": "LACCIS-9FF2A2",
-    "role": "client",
-    "created_at": "2026-02-04T18:42:52.752952"
-  },
-  {
     "id": "legal-1",
     "name": "Varsha",
     "email": "vars.71772317156@gct.ac.in",
     "password": "Tj5hETjBw41gjLri",
     "role": "legal_team",
     "created_at": "2026-02-16T21:48:23.981759"
-  },
-  {
-    "id": "client-2",
-    "name": "Dhana Dharsini",
-    "email": "dhan.71772318110@gct.ac.in",
-    "password": "LACCIS-25CC33",
-    "role": "client",
-    "created_at": "2026-02-17T17:19:22.842991"
-  },
-  {
-    "id": "client-3",
-    "name": "dhana",
-    "email": "dhan.71772318110@gct.ac.in",
-    "password": "LACCIS-D6EEAF",
-    "role": "client",
-    "created_at": "2026-02-16T17:33:07.056284"
   },
   {
     "id": "legal-2",
@@ -48,11 +24,19 @@
     "created_at": "2026-02-20T17:28:42.196401"
   },
   {
-    "id": "client-4",
-    "name": "saravana",
-    "email": "saravanavel.1136@gmail.com",
-    "password": "LACCIS-21E48E",
+    "id": "client-1",
+    "name": "Test Client",
+    "email": "test@example.com",
+    "password": "LACCIS-081371",
     "role": "client",
-    "created_at": "2026-02-23T18:09:53.409058"
+    "created_at": "2026-02-23T18:33:13.868473"
+  },
+  {
+    "id": "client-2",
+    "name": "lathiesh",
+    "email": "lathiesh1247@gmail.com",
+    "password": "LACCIS-E2F58C",
+    "role": "client",
+    "created_at": "2026-02-23T18:42:59.213932"
   }
 ]

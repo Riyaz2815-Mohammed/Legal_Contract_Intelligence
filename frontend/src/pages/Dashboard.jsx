@@ -115,9 +115,14 @@ function Dashboard({ user, onLogout }) {
                     />
                 </div>
 
-                <div className="section-header" style={{ marginTop: '2.5rem' }}>
-                    <h2>All Clients</h2>
-                    <p>Manage and monitor your legal workspaces</p>
+                <div className="section-header" style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <h2>All Clients</h2>
+                        <p>Manage and monitor your legal workspaces</p>
+                    </div>
+                    <button className="btn btn-primary" onClick={() => navigate('/invite-client')}>
+                        Create New Client
+                    </button>
                 </div>
 
                 <div className="table-wrapper">

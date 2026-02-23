@@ -117,14 +117,14 @@ function ClientDashboard({ user, onLogout }) {
                                     </div>
                                 </div>
 
-                                <div className="assigned-contract-v2 workspace-card" style={{ marginBottom: '2rem', padding: '1.5rem' }}>
+                                <div className="assigned-contract-v2 workspace-card" style={{ marginBottom: '2rem', padding: '1.5rem', background: '#ffffff', border: '1px solid #e2e8f0' }}>
                                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                         <div>
                                             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
-                                                <h3 style={{ margin: 0, color: 'white' }}>{assignedContract.title}</h3>
+                                                <h3 style={{ margin: 0, color: '#1e293b' }}>{assignedContract.title}</h3>
                                                 <StatusBadge status={assignedContract.status} />
                                             </div>
-                                            <p style={{ margin: 0, color: '#94a3b8', fontSize: '0.875rem' }}>
+                                            <p style={{ margin: 0, color: '#64748b', fontSize: '0.875rem' }}>
                                                 Assigned by {assignedContract.assignedBy} on {assignedContract.date}
                                             </p>
                                         </div>

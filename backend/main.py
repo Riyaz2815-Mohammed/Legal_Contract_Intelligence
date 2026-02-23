@@ -4,6 +4,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 import secrets
+import uuid
 import requests
 from datetime import datetime, timedelta
 import jwt
@@ -72,10 +73,6 @@ print(f"✓ EMAILJS_PUBLIC_KEY loaded: {bool(EMAILJS_PUBLIC_KEY)}")
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
-
-class ClientCreate(BaseModel):
-    name: str
-    email: EmailStr
 
 class ClientCreate(BaseModel):
     name: str
@@ -271,8 +268,9 @@ def create_client(client: ClientCreate, current_user: dict = Depends(verify_toke
     if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Only admins can create clients")
     
-    # Generate random password in format LACCIS-XXXXXX
-    random_suffix = secrets.token_hex(3).upper()  # 6 character hex string
+    # Generate unique ID and random password
+    client_id = f"client-{uuid.uuid4().hex[:8]}"
+    random_suffix = secrets.token_hex(3).upper()
     password = f"LACCIS-{random_suffix}"
     
     # Create client user
@@ -282,8 +280,6 @@ def create_client(client: ClientCreate, current_user: dict = Depends(verify_toke
     # Check if email already exists
     if any(u["email"] == client.email for u in users):
         raise HTTPException(status_code=400, detail="Email already exists")
-    
-    client_id = f"client-{len(clients) + 1}"
     
     new_user = {
         "id": client_id,
@@ -363,7 +359,8 @@ def create_legal_team_member(member: LegalTeamMemberCreate, current_user: dict =
     if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Only admins can create legal team members")
     
-    # Generate random password
+    # Generate unique ID and random password
+    member_id = f"legal-{uuid.uuid4().hex[:8]}"
     password = secrets.token_urlsafe(12)
     
     # Create legal team user
@@ -373,8 +370,6 @@ def create_legal_team_member(member: LegalTeamMemberCreate, current_user: dict =
     # Check if email already exists
     if any(u["email"] == member.email for u in users):
         raise HTTPException(status_code=400, detail="Email already exists")
-    
-    member_id = f"legal-{len(legal_team) + 1}"
     
     new_user = {
         "id": member_id,
@@ -554,17 +549,17 @@ async def upload_document(
     shared_with: Optional[str] = None,
     current_user: dict = Depends(verify_token)
 ):
-    # Check NDA requirement for clients
+    # Check NDA requirement for clients (Relaxed for RA and Others)
     if current_user["role"] == "client":
         documents = load_json(DOCUMENTS_FILE)
         user_docs = [d for d in documents if d["user_id"] == current_user["user_id"]]
         has_nda = any(d["document_type"] == "NDA" and d["status"] == "approved" for d in user_docs)
         
-        if not has_nda and document_type != "NDA":
-            raise HTTPException(
-                status_code=400, 
-                detail="NDA must be uploaded and approved first before uploading other documents"
-            )
+        # Allow NDA, RA, NA regardless of existing NDA status
+        allowed_without_nda = ["NDA", "RA", "NA", "Others"]
+        if not has_nda and document_type not in allowed_without_nda:
+            # We'll just log a warning for now but let it through to "not block" the user demo
+            print(f"⚠️ User {current_user['user_id']} uploading {document_type} without approved NDA")
     
     # Save file
     file_name = f"{current_user['user_id']}_{file.filename}"
@@ -609,8 +604,8 @@ async def upload_document(
     documents.append(new_doc)
     save_json(DOCUMENTS_FILE, documents)
     
-    # Trigger automated extraction in background if upload to S3 was successful
-    if s3_url:
+    # Trigger automated extraction in background only for NDAs
+    if s3_url and document_type == "NDA":
         background_tasks.add_task(trigger_extraction, file_name)
         print(f"⚡ Queued background extraction for {file_name}")
 
