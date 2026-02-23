@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
@@ -11,6 +11,9 @@ import os
 import json
 from pathlib import Path
 from dotenv import load_dotenv
+import boto3
+from botocore.exceptions import ClientError
+import requests
 
 app = FastAPI(title="LACCIS API", description="Legal Clause Classification Intelligence System")
 
@@ -45,6 +48,20 @@ EMAILJS_SERVICE_ID = os.getenv("EMAILJS_SERVICE_ID")
 EMAILJS_TEMPLATE_ID = os.getenv("EMAILJS_TEMPLATE_ID")
 EMAILJS_PUBLIC_KEY = os.getenv("EMAILJS_PUBLIC_KEY")
 EMAILJS_PRIVATE_KEY = os.getenv("EMAILJS_PRIVATE_KEY")
+
+# AWS Configuration
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
+AWS_REGION = os.getenv("REGION")
+BUCKET_NAME = os.getenv("BUCKET_NAME")
+
+# Initialize S3 Client
+s3_client = boto3.client(
+    's3',
+    aws_access_key_id=AWS_ACCESS_KEY,
+    aws_secret_access_key=AWS_SECRET_KEY,
+    region_name=AWS_REGION
+)
 
 # Debug: Print if credentials are loaded
 print(f"✓ EMAILJS_SERVICE_ID loaded: {bool(EMAILJS_SERVICE_ID)}")
@@ -492,6 +509,16 @@ def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
                 file_path.unlink()
         except Exception as e:
             print(f"Error deleting file: {e}")
+            
+        # Delete from S3
+        try:
+            s3_key = doc.get("s3_key")
+            if s3_key:
+                print(f"☁️ Deleting {s3_key} from S3...")
+                s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+                print(f"✅ Successfully deleted from S3")
+        except ClientError as e:
+            print(f"❌ S3 Delete Error: {e}")
     
     # Remove documents from list
     documents = [d for d in documents if d["user_id"] != client_id]
@@ -504,8 +531,24 @@ def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
     }
 
 
+def trigger_extraction(file_name: str):
+    """Background task: call extraction service with adequate timeout."""
+    try:
+        extract_url = f"http://localhost:5000/extract_s3/{file_name}"
+        print(f"⚡ [Background] Triggering extraction for {file_name}...")
+        response = requests.get(extract_url, timeout=120)  # 2-min timeout
+        result = response.json()
+        if result.get("status") == "success":
+            print(f"✅ [Background] Extraction complete: {result.get('clauses_found', 0)} clauses found")
+        else:
+            print(f"⚠️ [Background] Extraction returned: {result.get('message', 'unknown error')}")
+    except Exception as e:
+        print(f"❌ [Background] Extraction failed for {file_name}: {e}")
+
+
 @app.post("/api/documents/upload")
 async def upload_document(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     document_type: str = "Others",
     shared_with: Optional[str] = None,
@@ -524,11 +567,22 @@ async def upload_document(
             )
     
     # Save file
-    file_path = UPLOADS_DIR / f"{current_user['user_id']}_{file.filename}"
+    file_name = f"{current_user['user_id']}_{file.filename}"
+    file_path = UPLOADS_DIR / file_name
     
     with open(file_path, "wb") as f:
         content = await file.read()
         f.write(content)
+    
+    # Upload to S3
+    try:
+        print(f"☁️ Uploading {file_name} to S3 bucket: {BUCKET_NAME}...")
+        s3_client.upload_file(str(file_path), BUCKET_NAME, file_name)
+        print(f"✅ Successfully uploaded to S3")
+        s3_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
+    except ClientError as e:
+        print(f"❌ S3 Upload Error: {e}")
+        s3_url = None
     
     # Save document metadata
     documents = load_json(DOCUMENTS_FILE)
@@ -547,21 +601,86 @@ async def upload_document(
         "status": status,  # pending, approved, rejected, uploaded
         "shared_with": shared_with if shared_with else [],
         "uploaded_at": datetime.now().isoformat(),
-        "file_path": str(file_path)
+        "file_path": str(file_path),
+        "s3_url": s3_url,
+        "s3_key": file_name
     }
     
     documents.append(new_doc)
     save_json(DOCUMENTS_FILE, documents)
     
+    # Trigger automated extraction in background if upload to S3 was successful
+    if s3_url:
+        background_tasks.add_task(trigger_extraction, file_name)
+        print(f"⚡ Queued background extraction for {file_name}")
+
     # Notify admin if client uploaded NDA
     if document_type == "NDA" and current_user["role"] == "client":
         # In production, send email notification to admin
         pass
     
     return {
-        "message": "Document uploaded successfully",
+        "message": "Document uploaded successfully and queued for extraction",
         "document": new_doc
     }
+
+@app.get("/api/documents/analysis/{document_id}")
+def get_document_analysis(
+    document_id: str,
+    current_user: dict = Depends(verify_token)
+):
+    documents = load_json(DOCUMENTS_FILE)
+    doc = next((d for d in documents if d["id"] == document_id), None)
+    
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    s3_key = doc.get("s3_key")
+    if not s3_key:
+        raise HTTPException(status_code=400, detail="Document analysis not available")
+        
+    # The extraction results are saved as .json in extracter/extracted_texts/
+    # From backend/main.py, the path is ../extracter/extracted_texts/
+    json_filename = str(Path(s3_key).with_suffix('.json'))
+    analysis_path = Path(__file__).parent.parent / "extracter" / "extracted_texts" / json_filename
+    
+    if not analysis_path.exists():
+        # Maybe it's still being processed or failed
+        print(f"⚠️ Analysis file not found at: {analysis_path}")
+        return {"document": doc, "clauses": [], "status": "processing"}
+        
+    try:
+        with open(analysis_path, "r", encoding="utf-8") as f:
+            clauses = json.load(f)
+        return {"document": doc, "clauses": clauses, "status": "complete"}
+    except Exception as e:
+        print(f"❌ Error reading analysis file: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading analysis: {str(e)}")
+
+@app.get("/api/documents/download/{document_id}")
+def download_document(
+    document_id: str,
+    current_user: dict = Depends(verify_token)
+):
+    documents = load_json(DOCUMENTS_FILE)
+    doc = next((d for d in documents if d["id"] == document_id), None)
+    
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+        
+    s3_key = doc.get("s3_key")
+    if not s3_key:
+        raise HTTPException(status_code=400, detail="Document not available on S3")
+        
+    try:
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
+            ExpiresIn=3600
+        )
+        return {"download_url": url}
+    except ClientError as e:
+        raise HTTPException(status_code=500, detail=f"S3 Error: {str(e)}")
 
 @app.post("/api/documents/share")
 def share_document(
@@ -663,6 +782,48 @@ def approve_document(
     
     raise HTTPException(status_code=404, detail="Document not found")
 
+@app.post("/api/documents/reject/{document_id}")
+def reject_document(
+    document_id: str,
+    current_user: dict = Depends(verify_token)
+):
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Only admins can reject documents")
+    
+    documents = load_json(DOCUMENTS_FILE)
+    
+    for i, doc in enumerate(documents):
+        if doc["id"] == document_id:
+            documents[i]["status"] = "rejected"
+            documents[i]["rejected_at"] = datetime.now().isoformat()
+            documents[i]["rejected_by"] = current_user["user_id"]
+            
+            save_json(DOCUMENTS_FILE, documents)
+            
+            # Notify client
+            users = load_json(USERS_FILE)
+            client = next((u for u in users if u["id"] == doc["user_id"]), None)
+            
+            if client:
+                email_body = f"""
+                <html>
+                <body style="font-family: Arial, sans-serif; padding: 20px;">
+                    <h2 style="color: #ef4444;">Document Rejected</h2>
+                    <p>Your {doc['document_type']} was not approved.</p>
+                    <p><strong>Document:</strong> {doc['filename']}</p>
+                    <p>Please check the requirements and upload again if necessary.</p>
+                </body>
+                </html>
+                """
+                send_email(client["email"], f"{doc['document_type']} Update - LACCIS", email_body)
+            
+            return {
+                "message": "Document rejected successfully",
+                "document": documents[i]
+            }
+    
+    raise HTTPException(status_code=404, detail="Document not found")
+
 @app.get("/api/documents/list")
 def list_documents(current_user: dict = Depends(verify_token)):
     documents = load_json(DOCUMENTS_FILE)
@@ -722,30 +883,23 @@ def send_message(msg: MessageSend, current_user: dict = Depends(verify_token)):
 @app.get("/api/messages/list/{other_user_id}")
 def list_messages(other_user_id: str, current_user: dict = Depends(verify_token)):
     try:
-        print(f"DEBUG: list_messages request - current_user: {current_user.get('user_id')}, other_user_id: {other_user_id}")
-        
-        messages = load_json(MESSAGES_FILE)
         user_id = current_user.get("user_id")
-        
         if not user_id:
             raise HTTPException(status_code=401, detail="Invalid token: missing user_id")
 
-        # Strictly 1-on-1 filtering
+        print(f"🔍 Chat Request: {user_id} <-> {other_user_id}")
+        messages = load_json(MESSAGES_FILE)
+        
+        # Strictly 1-on-1 private filtering
         filtered = [
             m for m in messages
             if (m.get("sender_id") == user_id and m.get("recipient_id") == other_user_id)
             or (m.get("sender_id") == other_user_id and m.get("recipient_id") == user_id)
         ]
         
-        print(f"DEBUG: Found {len(filtered)} messages")
-        return {"messages": filtered}
-        
-        print(f"DEBUG: Found {len(filtered)} messages")
         return {"messages": filtered}
     except Exception as e:
-        import traceback
-        print(f"❌ CRITICAL ERROR in list_messages: {str(e)}")
-        traceback.print_exc()
+        print(f"❌ Chat List Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":

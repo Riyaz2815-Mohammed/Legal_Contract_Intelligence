@@ -1,7 +1,7 @@
 .table-wrapper {
-    background: rgba(15, 17, 26, 0.4);
+    background: #ffffff;
     border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid #e2e8f0;
     overflow: hidden;
     margin-top: 1rem;
 }
@@ -13,20 +13,21 @@
 }
 
 .custom-table th {
-    padding: 1.25rem 1.5rem;
-    background: rgba(255, 255, 255, 0.02);
-    color: #94a3b8;
+    padding: 1rem 1.5rem;
+    background: #f8fafc;
+    color: #64748b;
     font-size: 0.75rem;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    border-bottom: 1px solid #f1f5f9;
 }
 
 .custom-table td {
-    padding: 1.25rem 1.5rem;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    color: white;
+    padding: 1.125rem 1.5rem;
+    border-bottom: 1px solid #f8fafc;
+    color: #1e293b;
+    font-size: 0.9375rem;
 }
 
 .custom-table tr:last-child td {
@@ -34,7 +35,7 @@
 }
 
 .custom-table tr:hover td {
-    background: rgba(255, 255, 255, 0.01);
+    background: #f8fafc;
 }
 
 .client-info-cell {
@@ -46,13 +47,13 @@
 .client-avatar {
     width: 40px;
     height: 40px;
-    background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(79, 70, 229, 0.2) 100%);
-    border: 1px solid rgba(99, 102, 241, 0.3);
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
     border-radius: 12px;
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #818cf8;
+    color: #2563EB;
     font-weight: 600;
 }
 
@@ -64,16 +65,18 @@
 .client-name {
     font-weight: 600;
     font-size: 0.9375rem;
+    color: #1e293b;
 }
 
 .client-email {
     font-size: 0.8125rem;
-    color: #64748b;
+    color: #94a3b8;
 }
 
 .doc-count {
     font-weight: 600;
     font-size: 0.9375rem;
+    color: #1e293b;
 }
 
 .doc-count.pending {
@@ -88,10 +91,10 @@
 
 .btn-workspace {
     padding: 0.5rem 1rem;
-    background: rgba(99, 102, 241, 0.1);
-    border: 1px solid rgba(99, 102, 241, 0.2);
+    background: #EFF6FF;
+    border: 1px solid #BFDBFE;
     border-radius: 8px;
-    color: #818cf8;
+    color: #2563EB;
     font-size: 0.875rem;
     font-weight: 600;
     cursor: pointer;
@@ -99,7 +102,7 @@
 }
 
 .btn-workspace:hover {
-    background: #6366f1;
+    background: #2563EB;
     color: white;
     transform: translateY(-1px);
 }
@@ -109,7 +112,7 @@
     background: transparent;
     border: 1px solid transparent;
     border-radius: 8px;
-    color: #64748b;
+    color: #94a3b8;
     cursor: pointer;
     transition: all 0.2s ease;
     display: flex;
@@ -118,26 +121,26 @@
 }
 
 .btn-icon-delete:hover {
-    background: rgba(239, 68, 68, 0.1);
+    background: #fef2f2;
     color: #ef4444;
-    border-color: rgba(239, 68, 68, 0.2);
+    border-color: #fecaca;
 }
 
 .table-loading,
 .table-empty {
     padding: 4rem;
     text-align: center;
-    color: #64748b;
-    background: rgba(15, 17, 26, 0.4);
+    color: #94a3b8;
+    background: #ffffff;
     border-radius: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    border: 1px solid #e2e8f0;
 }
 
 .spinner {
     width: 24px;
     height: 24px;
-    border: 2px solid rgba(99, 102, 241, 0.1);
-    border-top-color: #6366f1;
+    border: 2px solid #e2e8f0;
+    border-top-color: #2563EB;
     border-radius: 50%;
     animation: spin 1s linear infinite;
     margin: 0 auto 1rem;

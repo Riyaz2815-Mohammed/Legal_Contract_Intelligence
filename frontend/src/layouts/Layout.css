@@ -1,7 +1,7 @@
 .layout-container {
     display: flex;
     min-height: 100vh;
-    background: #0f111a;
+    background: #F5F6F8;
 }
 
 .main-content {
@@ -20,9 +20,8 @@
 
 .content-header {
     padding: 1.5rem 2rem;
-    background: rgba(15, 17, 26, 0.8);
-    backdrop-filter: blur(12px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
     position: sticky;
     top: 0;
     z-index: 50;
@@ -36,16 +35,16 @@
 }
 
 .breadcrumb-item {
-    color: #64748b;
+    color: #94a3b8;
 }
 
 .breadcrumb-item.active {
-    color: #818cf8;
+    color: #2563EB;
     font-weight: 500;
 }
 
 .breadcrumb-separator {
-    color: #334155;
+    color: #cbd5e1;
 }
 
 .scrollable-content {
@@ -64,10 +63,10 @@
 }
 
 .scrollable-content::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.1);
+    background: #cbd5e1;
     border-radius: 3px;
 }
 
 .scrollable-content::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.2);
+    background: #94a3b8;
 }

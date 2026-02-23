@@ -148,18 +148,18 @@ function Upload({ user, onLogout }) {
             </Modal>
 
             <Modal isOpen={shareModal.open} onClose={() => setShareModal({ open: false, document: null })}>
-                <h3 style={{ color: 'white', marginBottom: '1rem' }}>Share Document</h3>
-                <p style={{ color: '#94a3b8', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
+                <h3 style={{ color: '#1e293b', marginBottom: '1rem' }}>Share Document</h3>
+                <p style={{ color: '#64748b', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
                     Send "{shareModal.document?.filename}" to:
                 </p>
                 {user.role === 'admin' && (
                     <div className="form-group">
-                        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#94a3b8', fontSize: '0.8125rem' }}>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', color: '#64748b', fontSize: '0.8125rem', fontWeight: '600' }}>
                             Target Client
                         </label>
                         <select
                             className="form-control"
-                            style={{ width: '100%', padding: '0.75rem', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '10px', color: 'white' }}
+                            style={{ width: '100%', padding: '0.75rem', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', color: '#1e293b' }}
                             onChange={(e) => e.target.value && handleShareSubmit(e.target.value)}
                         >
                             <option value="">Select a client...</option>
