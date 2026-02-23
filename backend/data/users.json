@@ -54,5 +54,29 @@
     "password": "LACCIS-21E48E",
     "role": "client",
     "created_at": "2026-02-23T18:09:53.409058"
+  },
+  {
+    "id": "client-5",
+    "name": "lathiesh",
+    "email": "lathiesh@theyellow.network",
+    "password": "LACCIS-C9C37F",
+    "role": "client",
+    "created_at": "2026-02-23T18:36:02.305500"
+  },
+  {
+    "id": "client-6",
+    "name": "lathiesh",
+    "email": "lathieshmahendran24@gmail.com",
+    "password": "LACCIS-F656BE",
+    "role": "client",
+    "created_at": "2026-02-23T18:37:05.305693"
+  },
+  {
+    "id": "client-7",
+    "name": "LATHIESH",
+    "email": "lathiesh1247@gmail.com",
+    "password": "LACCIS-1791D5",
+    "role": "client",
+    "created_at": "2026-02-23T18:39:21.826937"
   }
 ]
