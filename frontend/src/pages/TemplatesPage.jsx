@@ -74,6 +74,24 @@ const TemplatesPage = ({ user, onLogout }) => {
         return filtered.sort((a, b) => new Date(b.uploaded_at) - new Date(a.uploaded_at))[0];
     };
 
+    const handleDownloadRequest = async (templateId) => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/templates/download/${templateId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (data.download_url) {
+                window.open(data.download_url, '_blank');
+            } else {
+                alert('Template download failed');
+            }
+        } catch (err) {
+            console.error('Download error:', err);
+            alert('Connection error');
+        }
+    };
+
     return (
         <Layout user={user} onLogout={onLogout} pageTitle="Standard Templates">
             <div className="templates-container">
@@ -111,7 +129,7 @@ const TemplatesPage = ({ user, onLogout }) => {
 
                                 <div className="template-actions">
                                     <label className={`upload-btn ${uploading === type.id ? 'loading' : ''}`}>
-                                        {uploading === type.id ? 'Uploading...' : 'Upload New Template'}
+                                        {uploading === type.id ? 'Uploading...' : (active ? 'Update Template' : 'Upload New')}
                                         <input
                                             type="file"
                                             accept=".pdf,.docx"
@@ -121,10 +139,14 @@ const TemplatesPage = ({ user, onLogout }) => {
                                         />
                                     </label>
                                     {active && (
-                                        <a href={active.s3_url || `${API_URL}/api/contracts/download/${active.id}?is_template=true`}
-                                            target="_blank" rel="noopener noreferrer" className="view-btn">
-                                            View Active
-                                        </a>
+                                        <div className="active-actions">
+                                            <button
+                                                onClick={() => handleDownloadRequest(active.id)}
+                                                className="view-btn"
+                                            >
+                                                View Source
+                                            </button>
+                                        </div>
                                     )}
                                 </div>
                             </div>
@@ -134,6 +156,7 @@ const TemplatesPage = ({ user, onLogout }) => {
             </div>
         </Layout>
     );
+
 };
 
 export default TemplatesPage;

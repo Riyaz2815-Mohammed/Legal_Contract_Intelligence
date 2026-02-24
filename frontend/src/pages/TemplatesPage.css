@@ -157,3 +157,29 @@
 .view-btn:hover {
     background: var(--bg-body);
 }
+
+.active-actions {
+    display: flex;
+    gap: 8px;
+    flex: 2;
+}
+
+.active-actions button, .active-actions a {
+    flex: 1;
+}
+
+.analysis-btn {
+    padding: 10px 16px;
+    background: var(--primary);
+    color: white;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    text-align: center;
+    transition: opacity 0.2s;
+}
+
+.analysis-btn:hover {
+    opacity: 0.9;
+}

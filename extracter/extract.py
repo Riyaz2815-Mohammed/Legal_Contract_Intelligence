@@ -35,26 +35,116 @@ os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(TEXT_FOLDER, exist_ok=True)
 
 
+import base64
+from mistralai import Mistral
+
+MISTRAL_API_KEY = os.getenv("MISTRAL_API")
+
+def encode_image(image_path):
+    """Encode the image to base64."""
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode('utf-8')
+
+def mistral_ocr(local_path: str, is_pdf: bool = False) -> str:
+    """
+    Perform OCR using Mistral AI.
+    Handles scanned PDFs and image files.
+    """
+    if not MISTRAL_API_KEY:
+        print("❌ MISTRAL_API key not found in environment.")
+        return ""
+
+    client = Mistral(api_key=MISTRAL_API_KEY.strip().strip('"'))
+    
+    try:
+        if is_pdf:
+            print(f"📄 [OCR] Processing PDF via Mistral: {local_path}")
+            # For PDFs, we upload the file
+            upload_pdf = client.files.upload(
+                file={
+                    "file_name": os.path.basename(local_path),
+                    "content": open(local_path, "rb")
+                },
+                purpose="ocr"
+            )
+            signed_url = client.files.get_signed_url(file_id=upload_pdf.id)
+            ocr_response = client.ocr.process(
+                model="mistral-ocr-latest",
+                document={
+                    "type": "document_url",
+                    "document_url": signed_url.url
+                }
+            )
+        else:
+            print(f"🖼️ [OCR] Processing Image via Mistral: {local_path}")
+            # For images, we use base64
+            b64_image = encode_image(local_path)
+            ext = os.path.splitext(local_path)[1].lower().strip(".")
+            if ext == "jpg": ext = "jpeg"
+            
+            ocr_response = client.ocr.process(
+                model="mistral-ocr-latest",
+                document={
+                    "type": "image_url",
+                    "image_url": f"data:image/{ext};base64,{b64_image}"
+                }
+            )
+
+        extracted_text = ""
+        for i, page in enumerate(ocr_response.pages):
+            extracted_text += f"PAGE {i+1}\n"
+            extracted_text += "-" * 20 + "\n"
+            extracted_text += page.markdown + "\n\n"
+        
+        return extracted_text
+
+    except Exception as e:
+        print(f"❌ Mistral OCR Error: {e}")
+        return ""
+
 def extract_text_from_file(local_path: str) -> str:
     """
     Extract plain text from a file, dispatching based on extension.
-    Supports: .pdf, .docx, .txt
+    Supports: .pdf, .docx, .txt, .jpg, .jpeg, .png
     """
     ext = os.path.splitext(local_path)[1].lower()
     extracted_text = ""
 
     if ext == ".pdf":
+        text_content = ""
+        pages_with_text = 0
+        total_pages = 0
+        
         with pdfplumber.open(local_path) as pdf:
+            total_pages = len(pdf.pages)
             for page_number, page in enumerate(pdf.pages, start=1):
-                text = page.extract_text() or ""
-                extracted_text += f"PAGE {page_number}\n"
-                extracted_text += "-" * 20 + "\n"
-                extracted_text += text + "\n\n"
+                page_text = page.extract_text()
+                if page_text and len(page_text.strip()) > 20: # Threshold for "real" text
+                    pages_with_text += 1
+                    text_content += page_text + " "
+                    extracted_text += f"PAGE {page_number}\n"
+                    extracted_text += "-" * 20 + "\n"
+                    extracted_text += page_text + "\n\n"
+        
+        # heuristic: if even one page is missing text, treat it as a potential mixed/scanned doc
+        is_scanned = False
+        if total_pages > 0:
+            # If any page is "empty" but the document has pages, we might need OCR
+            # Or if the overall text content is extremely low for the page count
+            if pages_with_text < total_pages or len(text_content.strip()) < (total_pages * 50):
+                is_scanned = True
+        
+        if is_scanned:
+            print(f"⚠️ [PDF] Mixed/Scanned content detected ({pages_with_text}/{total_pages} pages have text). Falling back to Mistral OCR for full accuracy...")
+            return mistral_ocr(local_path, is_pdf=True)
+
+    elif ext in [".jpg", ".jpeg", ".png"]:
+        print(f"🖼️ [Image] Extension {ext} detected. Using Mistral OCR...")
+        return mistral_ocr(local_path, is_pdf=False)
 
     elif ext == ".docx":
         from docx import Document
         doc = Document(local_path)
-        # Group paragraphs – use heading breaks as "pages"
         page_number = 1
         extracted_text += f"PAGE {page_number}\n" + "-" * 20 + "\n"
         for para in doc.paragraphs:

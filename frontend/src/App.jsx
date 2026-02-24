@@ -7,7 +7,10 @@ import Upload from './pages/Upload';
 import ClientWorkspace from './pages/ClientWorkspace';
 import InviteClient from './pages/InviteClient';
 import TemplatesPage from './pages/TemplatesPage';
+import DocumentAnalysis from './pages/DocumentAnalysis';
+import TemplateAnalysis from './pages/TemplateAnalysis';
 import './App.css';
+
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -97,7 +100,24 @@ function App() {
                 <Navigate to="/login" />
             }
           />
+          <Route
+            path="/analysis/:documentId"
+            element={
+              isAuthenticated ?
+                <DocumentAnalysis user={user} onLogout={handleLogout} /> :
+                <Navigate to="/login" />
+            }
+          />
+          <Route
+            path="/template-analysis/:templateId"
+            element={
+              isAuthenticated && (user?.role === 'admin' || user?.role === 'legal_team') ?
+                <TemplateAnalysis user={user} onLogout={handleLogout} /> :
+                <Navigate to="/login" />
+            }
+          />
           <Route path="/" element={<Navigate to="/login" />} />
+
         </Routes>
       </div>
     </Router>

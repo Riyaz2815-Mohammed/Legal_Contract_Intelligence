@@ -555,7 +555,7 @@ def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
     }
 
 
-def trigger_extraction(file_name: str):
+def trigger_extraction(file_name: str, client_id: Optional[str] = None, document_type: str = "Unknown", is_standard: bool = False):
     """Background task: perform extraction and classification locally."""
     try:
         # Ensure extracter directory is in path
@@ -600,7 +600,12 @@ def trigger_extraction(file_name: str):
         # 3. Classify and structured results as JSON
         # Note: parse_text_file expects a file path
         raw_blocks = parse_text_file(str(txt_path))
-        results = process_document(raw_blocks)
+        results = process_document(
+            raw_blocks, 
+            client_id=client_id, 
+            document_type=document_type, 
+            is_standard=is_standard
+        )
         
         with open(json_path, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2)
@@ -696,11 +701,18 @@ async def upload_document(
         details=f"Document: {file.filename} ({document_type})"
     )
     
-    # Trigger automated extraction in background for all documents
-    if s3_url:
-        background_tasks.add_task(trigger_extraction, file_name)
+    # Trigger automated extraction in background for all non-redlined documents
+    if document_type != "Redlined":
+        background_tasks.add_task(
+            trigger_extraction, 
+            file_name, 
+            client_id=current_user['user_id'], 
+            document_type=document_type, 
+            is_standard=False
+        )
         print(f"⚡ Queued background extraction for {file_name}")
-
+    else:
+        print(f"⏭️ Skipping extraction for REDLINED document: {file_name}")
     # Notify admin if client uploaded NDA
     if document_type == "NDA" and current_user["role"] == "client":
         # In production, send email notification to admin
@@ -1258,7 +1270,13 @@ async def upload_template(
     
     # Trigger automated extraction for templates
     if s3_url:
-        background_tasks.add_task(trigger_extraction, file_name)
+        background_tasks.add_task(
+            trigger_extraction, 
+            file_name, 
+            client_id=None, 
+            document_type=template_type, 
+            is_standard=True
+        )
         print(f"⚡ Queued background extraction for template {file_name}")
     
     # Record activity
@@ -1270,6 +1288,72 @@ async def upload_template(
     )
     
     return {"message": "Template uploaded successfully", "template": new_template}
+
+
+@app.get("/api/templates/analysis/{template_id}")
+def get_template_analysis(
+    template_id: str,
+    current_user: dict = Depends(verify_token)
+):
+    templates = load_json(TEMPLATES_FILE)
+    tmpl = next((t for t in templates if t["id"] == template_id), None)
+    
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+        
+    s3_key = tmpl.get("s3_key")
+    if not s3_key:
+        raise HTTPException(status_code=400, detail="Template analysis not available")
+        
+    json_filename = str(Path(s3_key).with_suffix('.json'))
+    analysis_path = Path(__file__).parent.parent / "extracter" / "extracted_texts" / json_filename
+    
+    if not analysis_path.exists():
+        print(f"⚠️ Template analysis file not found at: {analysis_path}")
+        return {"document": tmpl, "clauses": [], "status": "processing"}
+        
+    try:
+        with open(analysis_path, "r", encoding="utf-8") as f:
+            clauses = json.load(f)
+        return {"document": tmpl, "clauses": clauses, "status": "complete"}
+    except Exception as e:
+        print(f"❌ Error reading template analysis file: {e}")
+        raise HTTPException(status_code=500, detail=f"Error reading analysis: {str(e)}")
+
+
+@app.get("/api/templates/download/{template_id}")
+def download_template(
+    template_id: str,
+    current_user: dict = Depends(verify_token)
+):
+    templates = load_json(TEMPLATES_FILE)
+    tmpl = next((t for t in templates if t["id"] == template_id), None)
+    
+    if not tmpl:
+        raise HTTPException(status_code=404, detail="Template not found")
+        
+    s3_key = tmpl.get("s3_key")
+    if s3_key:
+        try:
+            url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
+                ExpiresIn=3600
+            )
+            return {"download_url": url}
+        except ClientError as e:
+            print(f"S3 Error for template {template_id}: {e}")
+
+    # Fallback to local file if not on S3 or S3 fails
+    file_path = Path(tmpl.get("file_path", ""))
+    if file_path.exists():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=str(file_path),
+            filename=tmpl["filename"],
+            media_type="application/octet-stream"
+        )
+    raise HTTPException(status_code=400, detail="Template not available")
 
 
 @app.get("/api/templates/list")

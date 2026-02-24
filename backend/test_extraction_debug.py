@@ -62,13 +62,36 @@ def test_extraction_standalone(file_name):
         raw_blocks = parse_text_file(str(txt_path))
         print(f"✓ Found {len(raw_blocks)} blocks")
         
-        results = process_document(raw_blocks)
-        print(f"✓ Classified {len(results)} clauses")
-        
+        # Test Case 1: Standard Template
+        print("\n--- Test Case 1: Standard Template ---")
+        results_std = process_document(
+            raw_blocks, 
+            client_id=None, 
+            document_type="NDA", 
+            is_standard=True
+        )
+        print(f"✓ Classified {len(results_std)} clauses")
+        if results_std:
+            print(f"Example Content (Cleaned): {results_std[0]['content'][:100]}...")
+            print(f"Schema Check: client_id={results_std[0]['client_id']}, standard={results_std[0]['standard']}, document={results_std[0]['document']}")
+            
+        # Test Case 2: Client Document
+        print("\n--- Test Case 2: Client Document ---")
+        results_client = process_document(
+            raw_blocks, 
+            client_id="client-007", 
+            document_type="NDA", 
+            is_standard=False
+        )
+        print(f"✓ Classified {len(results_client)} clauses")
+        if results_client:
+            print(f"Schema Check: client_id={results_client[0]['client_id']}, standard={results_client[0]['standard']}, document={results_client[0]['document']}")
+
+        # Save Standard results to JSON
         json_path = extract_docs_dir / f"{base_name}.json"
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2)
-        print(f"✓ Saved .json to {json_path}")
+            json.dump(results_std, f, indent=2)
+        print(f"\n✓ Saved Standard .json to {json_path}")
         print("--- TEST COMPLETE ---")
 
     except Exception as e:

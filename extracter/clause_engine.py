@@ -22,6 +22,7 @@ def extract_clause_id(text: str) -> Optional[str]:
         r"^(\d+\.)",                     # 1. (simple)
         r"^(\([a-zA-Z0-9]+\))",          # (a), (1)
         r"^([a-zA-Z]\.)",                # a. , b.
+        r"^([0-9]+\s+[A-Z][a-z]+)",      # 1 Indemnity (no period)
         r"^([IVXLCDM]+\.)",              # Roman numerals I., IV.
     ]
     
@@ -34,28 +35,55 @@ def extract_clause_id(text: str) -> Optional[str]:
 
 def classify_clause(text: str) -> str:
     """
-    Classifies the clause text into a standardized type using rules and keywords.
+    Classifies the clause text into a standardized type using rules, headers, and keywords.
     """
+    text_clean = text.strip()
+    text_lower = text_clean.lower()
+    
+    # Priority 1: Check if the text starts with a specific section header
+    header_logic = {
+        "Indemnity": [r"indemni"],
+        "Limitation of Liability": [r"limit.*liability", r"liability.*limit"],
+        "Confidentiality": [r"confidenti"],
+        "Termination": [r"terminat"],
+        "Payment Terms": [r"payment", r"fees", r"billing"],
+        "SLA": [r"service\s+level", r"uptime"],
+        "Governing Law": [r"governing\s+law", r"applicable\s+law"],
+        "Intellectual Property": [r"intellectual\s+property", r"ip\s+rights", r"ownership"],
+        "Warranty": [r"warrant"],
+        "Data Protection": [r"data\s+protection", r"privacy", r"gdpr"],
+        "Force Majeure": [r"force\s+majeure"],
+        "Non-Compete": [r"non-compete", r"non\s+compete"],
+        "Insurance": [r"insurance"],
+        "Notices": [r"notices"],
+        "Assignment": [r"assignment"],
+    }
+
+    # Check first 50 chars for headers
+    prefix = text_lower[:50]
+    for category, patterns in header_logic.items():
+        for pat in patterns:
+            if re.search(pat, prefix):
+                return category
+
+    # Priority 2: Standard Rule-based classification
     if not nlp:
         doc = None
     else:
-        doc = nlp(text.lower())
+        doc = nlp(text_lower)
 
-    text_lower = text.lower()
-    
     rules = {
-        "Indemnity": ["indemnify", "indemnification", "hold harmless"],
-        "Limitation of Liability": ["limitation of liability", "cap on liability", "exclude liability", "consequential damages"],
-        "Confidentiality": ["confidential", "non-disclosure", "proprietary information"],
-        "Termination": ["terminate", "termination", "cancellation", "term and termination"],
-        "Payment Terms": ["payment", "invoice", "fees", "billing"],
-        "SLA": ["service level", "sla", "uptime", "availability"],
-        "Governing Law": ["governing law", "choice of law", "jurisdiction", "laws of"],
-        "Jurisdiction": ["jurisdiction", "venue", "courts of"],
-        "Force Majeure": ["force majeure", "act of god", "unforeseen circumstances"],
-        "Intellectual Property": ["intellectual property", "ip rights", "copyright", "trademark", "ownership"],
-        "Warranty": ["warranty", "warranties", "represent and warrant"],
-        "Data Protection": ["data protection", "gdpr", "personal data", "privacy"],
+        "Indemnity": ["indemnify", "indemnification", "hold harmless", "defend and hold"],
+        "Limitation of Liability": ["limitation of liability", "cap on liability", "exclude liability", "consequential damages", "indirect damages"],
+        "Confidentiality": ["confidential", "non-disclosure", "proprietary information", "trade secret"],
+        "Termination": ["terminate", "termination", "cancellation", "term and termination", "expiry"],
+        "Payment Terms": ["payment", "invoice", "fees", "billing", "due date", "remit"],
+        "SLA": ["service level", "sla", "uptime", "availability", "response time"],
+        "Governing Law": ["governing law", "choice of law", "jurisdiction", "laws of", "legal proceedings"],
+        "Force Majeure": ["force majeure", "act of god", "unforeseen circumstances", "beyond control"],
+        "Intellectual Property": ["intellectual property", "ip rights", "copyright", "trademark", "ownership", "work for hire"],
+        "Warranty": ["warranty", "warranties", "represent and warrant", "disclaimer of warranty"],
+        "Data Protection": ["data protection", "gdpr", "personal data", "privacy", "data subject"],
     }
     
     scores = {category: 0 for category in rules}
@@ -66,7 +94,7 @@ def classify_clause(text: str) -> str:
     for category, keywords in rules.items():
         for keyword in keywords:
             if keyword in token_text or keyword in text_lower:
-                scores[category] += 1
+                scores[category] += 2 if keyword in text_lower else 1
                 
     best_match = max(scores, key=scores.get)
     
@@ -142,26 +170,43 @@ def parse_text_file(file_path: str) -> List[Dict[str, Any]]:
         
     return extracted_blocks
 
-def process_document(extracted_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def process_document(
+    extracted_blocks: List[Dict[str, Any]], 
+    client_id: Optional[str] = None,
+    document_type: str = "Unknown",
+    is_standard: bool = False
+) -> List[Dict[str, Any]]:
     """
-    Process extracted text blocks and return structured data.
+    Process extracted text blocks and return structured data with improved cleaning and schema.
     """
     structured_records = []
     
     for block in extracted_blocks:
-        raw_text = block.get("raw_text", "")
+        raw_text = block.get("raw_text", "").strip()
         page_num = block.get("page_number")
         
         content_id = f"CNT-{uuid.uuid4().hex[:8].upper()}"
         clause_id = extract_clause_id(raw_text)
+        
+        # Clean the content: strip the clause_id and leading decorators
+        cleaned_content = raw_text
+        if clause_id:
+            # Escape clause_id for regex (e.g., "1.1" -> "1\.1")
+            escaped_id = re.escape(clause_id)
+            # Remove the id and any immediately following space/symbol
+            cleaned_content = re.sub(f"^{escaped_id}[\.\s:]*", "", cleaned_content, flags=re.IGNORECASE).strip()
+        
         clause_type = classify_clause(raw_text)
         
         record = {
             "content_id": content_id,
-            "content": raw_text,
+            "content": cleaned_content,
             "clause_id": clause_id,
             "clause": clause_type,
-            "page_number": page_num
+            "page_number": page_num,
+            "document": document_type,
+            "client_id": client_id,
+            "standard": is_standard
         }
         
         structured_records.append(record)
