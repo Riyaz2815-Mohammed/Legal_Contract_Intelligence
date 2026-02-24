@@ -19,6 +19,7 @@ import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
 import requests
+from embeddings.sbert_model import load_model
 
 app = FastAPI(title="LACCIS API", description="Legal Clause Classification Intelligence System")
 
@@ -1004,7 +1005,13 @@ def list_messages(other_user_id: str, current_user: dict = Depends(verify_token)
         print(f"❌ Chat List Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.on_event("startup")
+def startup_event():
+    load_model()
+    print("✅ SBERT model loaded successfully")
 @app.post("/api/contracts/share-with-client")
+
 async def share_contract_with_client(
     file: UploadFile = File(...),
     client_id: str = Form(""),
