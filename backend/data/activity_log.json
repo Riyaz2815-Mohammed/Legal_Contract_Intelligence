@@ -1,0 +1,42 @@
+[
+  {
+    "id": "act-ccf0874a",
+    "user_id": "client-2",
+    "client_id": "client-2",
+    "action": "Uploaded document",
+    "details": "Document: Non Disclosure Agreement.docx (Others)",
+    "timestamp": "2026-02-24T23:29:38.693075"
+  },
+  {
+    "id": "act-08e90e75",
+    "user_id": "client-2",
+    "client_id": "client-2",
+    "action": "Uploaded document",
+    "details": "Document: Non Disclosure Agreement.docx (Others)",
+    "timestamp": "2026-02-24T23:22:00.587325"
+  },
+  {
+    "id": "act-3d1a9127",
+    "user_id": "admin-1",
+    "client_id": "admin",
+    "action": "Uploaded Template",
+    "details": "Type: NDA, File: mutualnda.pdf",
+    "timestamp": "2026-02-24T23:10:04.849303"
+  },
+  {
+    "id": "act-051e7b3a",
+    "user_id": "admin-1",
+    "client_id": "admin",
+    "action": "Uploaded Template",
+    "details": "Type: RA, File: RA.pdf",
+    "timestamp": "2026-02-24T23:06:58.354582"
+  },
+  {
+    "id": "act-4b28d482",
+    "user_id": "client-2",
+    "client_id": "client-2",
+    "action": "Accepted contract",
+    "details": "Contract: Sample_ML_Explore.pdf",
+    "timestamp": "2026-02-24T22:42:52.140746"
+  }
+]

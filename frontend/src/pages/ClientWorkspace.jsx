@@ -1,10 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../layouts/Layout';
 import WorkspaceTabs from '../components/WorkspaceTabs';
 import ChatBox from '../components/ChatBox';
 import DocumentsTable from '../components/DocumentsTable';
 import StatusBadge from '../components/StatusBadge';
+import ActivityList from '../components/ActivityList';
 import './ClientWorkspace.css';
 
 const API_URL = 'http://localhost:8000';
@@ -16,6 +17,17 @@ const ClientWorkspace = ({ user, onLogout }) => {
     const [activeTab, setActiveTab] = useState('documents');
     const [documents, setDocuments] = useState([]);
     const [loading, setLoading] = useState(true);
+    const [activities, setActivities] = useState([]);
+    const [activitiesLoading, setActivitiesLoading] = useState(false);
+
+    // Share tab state
+    const [shareFile, setShareFile] = useState(null);
+    const [shareMessage, setShareMessage] = useState('');
+    const [shareDragging, setShareDragging] = useState(false);
+    const [shareLoading, setShareLoading] = useState(false);
+    const [shareSuccess, setShareSuccess] = useState('');
+    const [shareError, setShareError] = useState('');
+    const fileInputRef = useRef(null);
 
     const loadData = async () => {
         try {
@@ -48,9 +60,148 @@ const ClientWorkspace = ({ user, onLogout }) => {
         }
     };
 
+    const loadActivities = async () => {
+        setActivitiesLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/activity/list?client_id=${clientId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (res.ok) setActivities(data.activities);
+        } catch (err) {
+            console.error('Error loading activities:', err);
+        } finally {
+            setActivitiesLoading(false);
+        }
+    };
+
     useEffect(() => {
         loadData();
+        loadActivities();
     }, [clientId]);
+
+    const handleApprove = async (docId) => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/documents/approve/${docId}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                loadData();
+                loadActivities();
+            }
+            else console.error('Approve failed');
+        } catch (err) {
+            console.error('Approve error:', err);
+        }
+    };
+
+    const handleReject = async (docId) => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/documents/reject/${docId}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                loadData();
+                loadActivities();
+            }
+            else console.error('Reject failed');
+        } catch (err) {
+            console.error('Reject error:', err);
+        }
+    };
+
+    const handleDownload = async (docId) => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/documents/download/${docId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (data.download_url) {
+                window.open(data.download_url, '_blank');
+            }
+        } catch (err) {
+            console.error('Download error:', err);
+        }
+    };
+
+    // Share tab handlers
+    const validateFile = (file) => {
+        if (!file) return 'Please select a file.';
+        const ext = file.name.split('.').pop().toLowerCase();
+        if (!['pdf', 'docx'].includes(ext)) return 'Only PDF and DOCX files are allowed.';
+        if (file.size > 10 * 1024 * 1024) return 'File size must be under 10MB.';
+        return null;
+    };
+
+    const handleDrop = (e) => {
+        e.preventDefault();
+        setShareDragging(false);
+        const file = e.dataTransfer.files[0];
+        const err = validateFile(file);
+        if (err) { setShareError(err); return; }
+        setShareError('');
+        setShareFile(file);
+    };
+
+    const handleFileSelect = (e) => {
+        const file = e.target.files[0];
+        const err = validateFile(file);
+        if (err) { setShareError(err); return; }
+        setShareError('');
+        setShareFile(file);
+    };
+
+    const handleSendToClient = async () => {
+        const err = validateFile(shareFile);
+        if (err) { setShareError(err); return; }
+
+        setShareLoading(true);
+        setShareError('');
+        setShareSuccess('');
+
+        try {
+            const token = localStorage.getItem('token');
+            const formData = new FormData();
+            formData.append('file', shareFile);
+            formData.append('client_id', clientId);
+            if (shareMessage.trim()) formData.append('message', shareMessage.trim());
+
+            const res = await fetch(`${API_URL}/api/contracts/share-with-client`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+                body: formData
+            });
+            const data = await res.json();
+            if (res.ok) {
+                setShareSuccess(`✅ "${shareFile.name}" shared with ${client.name} successfully!`);
+                setShareFile(null);
+                setShareMessage('');
+                if (fileInputRef.current) fileInputRef.current.value = '';
+                loadActivities();
+            } else {
+                setShareError(data.detail || 'Failed to share contract.');
+            }
+        } catch (err) {
+            console.error('Share error:', err);
+            setShareError('Connection error. Please try again.');
+        } finally {
+            setShareLoading(false);
+        }
+    };
+
+    const handleCancelShare = () => {
+        setShareFile(null);
+        setShareMessage('');
+        setShareError('');
+        setShareSuccess('');
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
 
     if (loading || !client) {
         return (
@@ -92,7 +243,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
                 </div>
 
                 <div className="workspace-main">
-                    <WorkspaceTabs activeTab={activeTab} onTabChange={setActiveTab} />
+                    <WorkspaceTabs activeTab={activeTab} onTabChange={setActiveTab} showShareTab={true} />
 
                     <div className="tab-content">
                         {activeTab === 'documents' && (
@@ -105,7 +256,9 @@ const ClientWorkspace = ({ user, onLogout }) => {
                                         documents={documents}
                                         loading={false}
                                         currentUser={user}
-                                        onApprove={() => loadData()}
+                                        onApprove={handleApprove}
+                                        onReject={handleReject}
+                                        onDownload={handleDownload}
                                     />
                                 </div>
                             </div>
@@ -128,8 +281,97 @@ const ClientWorkspace = ({ user, onLogout }) => {
                                     <p>History of all actions in this workspace</p>
                                 </div>
                                 <div className="activity-log workspace-card">
-                                    {/* Activity log logic would go here */}
-                                    <div className="log-empty">No recent activity found.</div>
+                                    <ActivityList activities={activities} loading={activitiesLoading} />
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'share' && (
+                            <div className="share-section">
+                                <div className="section-actions">
+                                    <h2>Share Contract with Client</h2>
+                                    <p>Upload a contract to share directly with <strong>{client.name}</strong></p>
+                                </div>
+
+                                <div className="workspace-card share-card">
+                                    {/* Drag & Drop Area */}
+                                    <div
+                                        className={`share-dropzone${shareDragging ? ' dragging' : ''}${shareFile ? ' has-file' : ''}`}
+                                        onDragOver={(e) => { e.preventDefault(); setShareDragging(true); }}
+                                        onDragLeave={() => setShareDragging(false)}
+                                        onDrop={handleDrop}
+                                        onClick={() => fileInputRef.current?.click()}
+                                    >
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            accept=".pdf,.docx"
+                                            style={{ display: 'none' }}
+                                            onChange={handleFileSelect}
+                                        />
+                                        {shareFile ? (
+                                            <div className="share-file-preview">
+                                                <span className="share-file-icon">
+                                                    {shareFile.name.endsWith('.pdf') ? '📄' : '📝'}
+                                                </span>
+                                                <div className="share-file-info">
+                                                    <span className="share-file-name">{shareFile.name}</span>
+                                                    <span className="share-file-size">
+                                                        {(shareFile.size / 1024).toFixed(1)} KB
+                                                    </span>
+                                                </div>
+                                                <button
+                                                    className="share-file-remove"
+                                                    onClick={(e) => { e.stopPropagation(); handleCancelShare(); }}
+                                                    title="Remove file"
+                                                >×</button>
+                                            </div>
+                                        ) : (
+                                            <div className="share-dropzone-placeholder">
+                                                <div className="share-upload-icon">⬆️</div>
+                                                <p className="share-drop-text">Drag & drop your file here</p>
+                                                <p className="share-drop-sub">or</p>
+                                                <button className="btn-browse" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
+                                                    Browse File
+                                                </button>
+                                                <p className="share-format-hint">Allowed: PDF, DOCX &nbsp;·&nbsp; Max size: 10MB</p>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Notes Textarea */}
+                                    <div className="share-notes-section">
+                                        <label className="share-label">Message / Notes <span className="optional-label">(Optional)</span></label>
+                                        <textarea
+                                            className="share-textarea"
+                                            rows={4}
+                                            placeholder="Add any notes or instructions for the client..."
+                                            value={shareMessage}
+                                            onChange={(e) => setShareMessage(e.target.value)}
+                                        />
+                                    </div>
+
+                                    {/* Feedback */}
+                                    {shareError && <div className="share-alert share-alert-error">⚠️ {shareError}</div>}
+                                    {shareSuccess && <div className="share-alert share-alert-success">{shareSuccess}</div>}
+
+                                    {/* Action Buttons */}
+                                    <div className="share-actions">
+                                        <button
+                                            className="btn-send-client"
+                                            onClick={handleSendToClient}
+                                            disabled={shareLoading || !shareFile}
+                                        >
+                                            {shareLoading ? 'Sending...' : '📤 Send to Client'}
+                                        </button>
+                                        <button
+                                            className="btn-cancel-share"
+                                            onClick={handleCancelShare}
+                                            disabled={shareLoading}
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         )}

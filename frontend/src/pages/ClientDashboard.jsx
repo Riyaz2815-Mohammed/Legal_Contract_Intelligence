@@ -1,11 +1,13 @@
 import { useState, useEffect } from 'react';
 import Layout from '../layouts/Layout';
 import DocumentsTable from '../components/DocumentsTable';
+import FromLegalTable from '../components/FromLegalTable';
 import UploadArea from '../components/UploadArea';
 import Modal from '../components/Modal';
 import WorkspaceTabs from '../components/WorkspaceTabs';
 import ChatBox from '../components/ChatBox';
 import StatusBadge from '../components/StatusBadge';
+import ActivityList from '../components/ActivityList';
 import './Dashboard.css';
 import './ClientWorkspace.css';
 
@@ -19,7 +21,10 @@ function ClientDashboard({ user, onLogout }) {
     const [uploadType, setUploadType] = useState('Others');
     const [legalTeam, setLegalTeam] = useState([]);
     const [selectedRecipient, setSelectedRecipient] = useState(null);
-
+    const [sharedContracts, setSharedContracts] = useState([]);
+    const [sharedLoading, setSharedLoading] = useState(false);
+    const [activities, setActivities] = useState([]);
+    const [activitiesLoading, setActivitiesLoading] = useState(false);
 
     const loadDocuments = async () => {
         try {
@@ -56,10 +61,54 @@ function ClientDashboard({ user, onLogout }) {
         }
     };
 
+    const loadSharedContracts = async () => {
+        setSharedLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_URL}/api/contracts/from-legal`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            if (response.ok) {
+                setSharedContracts(data.contracts || []);
+            }
+        } catch (error) {
+            console.error('Error loading shared contracts:', error);
+        } finally {
+            setSharedLoading(false);
+        }
+    };
+
+    const loadActivities = async () => {
+        setActivitiesLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const response = await fetch(`${API_URL}/api/activity/list`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await response.json();
+            if (response.ok) {
+                setActivities(data.activities || []);
+            }
+        } catch (error) {
+            console.error('Error loading activities:', error);
+        } finally {
+            setActivitiesLoading(false);
+        }
+    };
+
     useEffect(() => {
         loadDocuments();
         loadLegalTeam();
+        loadActivities();
     }, []);
+
+    // Load shared contracts when From Legal tab is selected
+    useEffect(() => {
+        if (activeTab === 'from-legal') {
+            loadSharedContracts();
+        }
+    }, [activeTab]);
 
     const handleUploadClick = (type) => {
         setUploadType(type);
@@ -69,7 +118,24 @@ function ClientDashboard({ user, onLogout }) {
     const handleUploadComplete = () => {
         setShowUploadModal(false);
         loadDocuments();
+        loadActivities();
         setActiveTab('documents');
+    };
+
+    const handleAcceptContract = async (contractId) => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/contracts/accept/${contractId}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                loadSharedContracts();
+                loadActivities();
+            }
+        } catch (err) {
+            console.error('Accept contract error:', err);
+        }
     };
 
     return (
@@ -92,7 +158,7 @@ function ClientDashboard({ user, onLogout }) {
                 </div>
 
                 <div className="workspace-main">
-                    <WorkspaceTabs activeTab={activeTab} onTabChange={setActiveTab} />
+                    <WorkspaceTabs activeTab={activeTab} onTabChange={setActiveTab} showFromLegalTab={true} />
 
                     <div className="tab-content">
                         {activeTab === 'documents' && (
@@ -114,6 +180,25 @@ function ClientDashboard({ user, onLogout }) {
                                         documents={documents}
                                         loading={loading}
                                         currentUser={user}
+                                        hideActions={true}
+                                    />
+                                </div>
+                            </div>
+                        )}
+
+                        {activeTab === 'from-legal' && (
+                            <div className="documents-section">
+                                <div className="section-actions">
+                                    <h2>Contracts Shared by Legal</h2>
+                                    <p style={{ color: '#94a3b8', fontSize: '0.875rem', margin: 0 }}>
+                                        Contracts sent to you by the legal team
+                                    </p>
+                                </div>
+                                <div className="workspace-card">
+                                    <FromLegalTable
+                                        contracts={sharedContracts}
+                                        loading={sharedLoading}
+                                        onAccept={handleAcceptContract}
                                     />
                                 </div>
                             </div>
@@ -179,7 +264,7 @@ function ClientDashboard({ user, onLogout }) {
                                     <p>Track history of uploads and status changes</p>
                                 </div>
                                 <div className="activity-log workspace-card">
-                                    <div className="log-empty">Activity history will appear here.</div>
+                                    <ActivityList activities={activities} loading={activitiesLoading} />
                                 </div>
                             </div>
                         )}

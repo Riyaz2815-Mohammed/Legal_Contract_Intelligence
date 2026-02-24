@@ -1,0 +1,48 @@
+.fl-filename {
+    font-weight: 500;
+    color: #1e293b;
+    max-width: 220px;
+    word-break: break-word;
+}
+
+.fl-type-badge {
+    background: #EFF6FF;
+    color: #2563EB;
+    border: 1px solid #BFDBFE;
+    padding: 0.2rem 0.6rem;
+    border-radius: 6px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+}
+
+.fl-empty-cell {
+    padding: 3rem !important;
+    text-align: center;
+}
+
+.fl-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+    color: #94a3b8;
+}
+
+.fl-empty-icon {
+    font-size: 2.5rem;
+}
+
+.fl-empty p {
+    margin: 0;
+    font-size: 0.9375rem;
+}
+
+/* Download button override — wider for labeled button */
+.btn-download {
+    padding: 0.4rem 0.85rem;
+    font-size: 0.8125rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+}
