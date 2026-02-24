@@ -1,0 +1,22 @@
+[
+  {
+    "id": "tmpl-1397bad8",
+    "filename": "RA.pdf",
+    "template_type": "RA",
+    "uploaded_by": "admin-1",
+    "uploaded_at": "2026-02-24T23:06:58.352065",
+    "s3_url": "https://laccis.s3.eu-north-1.amazonaws.com/legal_template_RA_1d143e49_RA.pdf",
+    "s3_key": "legal_template_RA_1d143e49_RA.pdf",
+    "file_path": "data\\uploads\\legal_template_RA_1d143e49_RA.pdf"
+  },
+  {
+    "id": "tmpl-a0cf29ee",
+    "filename": "mutualnda.pdf",
+    "template_type": "NDA",
+    "uploaded_by": "admin-1",
+    "uploaded_at": "2026-02-24T23:10:04.831960",
+    "s3_url": "https://laccis.s3.eu-north-1.amazonaws.com/legal_template_NDA_335fced5_mutualnda.pdf",
+    "s3_key": "legal_template_NDA_335fced5_mutualnda.pdf",
+    "file_path": "data\\uploads\\legal_template_NDA_335fced5_mutualnda.pdf"
+  }
+]

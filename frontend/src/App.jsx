@@ -6,6 +6,7 @@ import LegalTeam from './pages/LegalTeam';
 import Upload from './pages/Upload';
 import ClientWorkspace from './pages/ClientWorkspace';
 import InviteClient from './pages/InviteClient';
+import TemplatesPage from './pages/TemplatesPage';
 import './App.css';
 
 function App() {
@@ -85,6 +86,14 @@ function App() {
             element={
               isAuthenticated && user?.role === 'admin' ?
                 <InviteClient user={user} onLogout={handleLogout} /> :
+                <Navigate to="/login" />
+            }
+          />
+          <Route
+            path="/templates"
+            element={
+              isAuthenticated && (user?.role === 'admin' || user?.role === 'legal_team') ?
+                <TemplatesPage user={user} onLogout={handleLogout} /> :
                 <Navigate to="/login" />
             }
           />
