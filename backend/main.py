@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
@@ -6,14 +6,18 @@ from typing import Optional, List
 import secrets
 import uuid
 import requests
+import sys
 from datetime import datetime, timedelta
 import jwt
 import os
 import json
+import asyncio
+import io
 from pathlib import Path
 from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import ClientError
+from botocore.config import Config
 import requests
 from embeddings.sbert_model import load_model
 
@@ -41,6 +45,9 @@ CLIENTS_FILE = DATA_DIR / "clients.json"
 LEGAL_TEAM_FILE = DATA_DIR / "legal_team.json"
 DOCUMENTS_FILE = DATA_DIR / "documents.json"
 MESSAGES_FILE = DATA_DIR / "messages.json"
+SHARED_CONTRACTS_FILE = DATA_DIR / "shared_contracts.json"
+ACTIVITY_LOG_FILE = DATA_DIR / "activity_log.json"
+TEMPLATES_FILE = DATA_DIR / "standard_templates.json"
 UPLOADS_DIR = DATA_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
 
@@ -57,18 +64,26 @@ AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 AWS_REGION = os.getenv("REGION")
 BUCKET_NAME = os.getenv("BUCKET_NAME")
 
-# Initialize S3 Client
+# Initialize S3 Client with timeouts to prevent infinite hang
 s3_client = boto3.client(
     's3',
     aws_access_key_id=AWS_ACCESS_KEY,
     aws_secret_access_key=AWS_SECRET_KEY,
-    region_name=AWS_REGION
+    region_name=AWS_REGION,
+    config=Config(
+        connect_timeout=10,   # 10 sec to establish connection
+        read_timeout=30,      # 30 sec to read response
+        retries={'max_attempts': 2}
+    )
 )
 
 # Debug: Print if credentials are loaded
 print(f"✓ EMAILJS_SERVICE_ID loaded: {bool(EMAILJS_SERVICE_ID)}")
 print(f"✓ EMAILJS_TEMPLATE_ID loaded: {bool(EMAILJS_TEMPLATE_ID)}")
 print(f"✓ EMAILJS_PUBLIC_KEY loaded: {bool(EMAILJS_PUBLIC_KEY)}")
+print(f"✓ AWS_ACCESS_KEY loaded: {bool(AWS_ACCESS_KEY)} | value starts with: {AWS_ACCESS_KEY[:4] if AWS_ACCESS_KEY else 'MISSING'}")
+print(f"✓ AWS_REGION: {AWS_REGION}")
+print(f"✓ BUCKET_NAME: {BUCKET_NAME}")
 
 # Models
 class LoginRequest(BaseModel):
@@ -125,6 +140,19 @@ def load_json(file_path):
 def save_json(file_path, data):
     with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(data, f, indent=2)
+
+def record_activity(user_id: str, client_id: str, action: str, details: str = ""):
+    activities = load_json(ACTIVITY_LOG_FILE)
+    activities.insert(0, {
+        "id": f"act-{uuid.uuid4().hex[:8]}",
+        "user_id": user_id,
+        "client_id": client_id,
+        "action": action,
+        "details": details,
+        "timestamp": datetime.now().isoformat()
+    })
+    # Keep last 500 activities
+    save_json(ACTIVITY_LOG_FILE, activities[:500])
 
 def create_token(user_id: str, email: str, role: str):
     payload = {
@@ -528,18 +556,61 @@ def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
 
 
 def trigger_extraction(file_name: str):
-    """Background task: call extraction service with adequate timeout."""
+    """Background task: perform extraction and classification locally."""
     try:
-        extract_url = f"http://localhost:5000/extract_s3/{file_name}"
-        print(f"⚡ [Background] Triggering extraction for {file_name}...")
-        response = requests.get(extract_url, timeout=120)  # 2-min timeout
-        result = response.json()
-        if result.get("status") == "success":
-            print(f"✅ [Background] Extraction complete: {result.get('clauses_found', 0)} clauses found")
-        else:
-            print(f"⚠️ [Background] Extraction returned: {result.get('message', 'unknown error')}")
+        # Ensure extracter directory is in path
+        backend_dir = Path(__file__).parent
+        project_root = backend_dir.parent
+        extracter_dir = project_root / "extracter"
+        
+        if str(extracter_dir) not in sys.path:
+            sys.path.append(str(extracter_dir))
+        
+        # Import extraction logic (lazy import to resolve at runtime)
+        from extract import extract_text_from_file
+        from clause_engine import parse_text_file, process_document
+        
+        # Local path for the file (it's already saved in UPLOADS_DIR)
+        local_path = UPLOADS_DIR / file_name
+        if not local_path.exists():
+            # If not in uploads, maybe check data/uploads? (UPLOADS_DIR is data/uploads)
+            print(f"❌ [Background] File not found for extraction at {local_path}")
+            return
+
+        print(f"⚡ [Background] Starting extraction for {file_name}...")
+        
+        # 1. Extract text (PDF, DOCX, TXT)
+        extracted_text = extract_text_from_file(str(local_path))
+        
+        # 2. Save .txt version to extracted_texts folder
+        base_name = Path(file_name).stem
+        txt_filename = base_name + ".txt"
+        json_filename = base_name + ".json"
+        
+        extract_docs_dir = extracter_dir / "extracted_texts"
+        extract_docs_dir.mkdir(parents=True, exist_ok=True)
+        
+        txt_path = extract_docs_dir / txt_filename
+        json_path = extract_docs_dir / json_filename
+        
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write(extracted_text)
+        print(f"📝 [Background] Saved extracted text to {txt_path}")
+        
+        # 3. Classify and structured results as JSON
+        # Note: parse_text_file expects a file path
+        raw_blocks = parse_text_file(str(txt_path))
+        results = process_document(raw_blocks)
+        
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(results, f, indent=2)
+            
+        print(f"✅ [Background] Classification complete: {len(results)} clauses saved to {json_path}")
+
     except Exception as e:
-        print(f"❌ [Background] Extraction failed for {file_name}: {e}")
+        import traceback
+        print(f"❌ [Background] Extraction failed for {file_name}")
+        print(traceback.format_exc())
 
 
 @app.post("/api/documents/upload")
@@ -561,14 +632,35 @@ async def upload_document(
         content = await file.read()
         f.write(content)
     
-    # Upload to S3
+    # Upload to S3 (run in thread pool to avoid blocking the async event loop)
     try:
-        print(f"☁️ Uploading {file_name} to S3 bucket: {BUCKET_NAME}...")
-        s3_client.upload_file(str(file_path), BUCKET_NAME, file_name)
+        if not AWS_ACCESS_KEY or not AWS_SECRET_KEY or not BUCKET_NAME:
+            raise ValueError(f"Missing AWS config — KEY:{bool(AWS_ACCESS_KEY)} SECRET:{bool(AWS_SECRET_KEY)} BUCKET:{bool(BUCKET_NAME)}")
+        print(f"☁️ Uploading {file_name} to S3 bucket: {BUCKET_NAME} (region: {AWS_REGION})...")
+        loop = asyncio.get_event_loop()
+        await asyncio.wait_for(
+            loop.run_in_executor(
+                None,
+                lambda: s3_client.put_object(
+                    Bucket=BUCKET_NAME,
+                    Key=file_name,
+                    Body=content
+                )
+            ),
+            timeout=30  # give up after 30 seconds
+        )
         print(f"✅ Successfully uploaded to S3")
         s3_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
+    except asyncio.TimeoutError:
+        print(f"❌ S3 Upload timed out after 30s — check bucket region/permissions")
+        s3_url = None
     except ClientError as e:
-        print(f"❌ S3 Upload Error: {e}")
+        error_code = e.response['Error']['Code']
+        error_msg = e.response['Error']['Message']
+        print(f"❌ S3 Upload Error [{error_code}]: {error_msg}")
+        s3_url = None
+    except Exception as e:
+        print(f"❌ S3 Upload Unexpected Error: {type(e).__name__}: {e}")
         s3_url = None
     
     # Save document metadata
@@ -596,8 +688,16 @@ async def upload_document(
     documents.append(new_doc)
     save_json(DOCUMENTS_FILE, documents)
     
-    # Trigger automated extraction in background only for NDAs
-    if s3_url and document_type == "NDA":
+    # Record activity
+    record_activity(
+        user_id=current_user["user_id"],
+        client_id=current_user["user_id"] if current_user["role"] == "client" else (shared_with or "admin"),
+        action="Uploaded document",
+        details=f"Document: {file.filename} ({document_type})"
+    )
+    
+    # Trigger automated extraction in background for all documents
+    if s3_url:
         background_tasks.add_task(trigger_extraction, file_name)
         print(f"⚡ Queued background extraction for {file_name}")
 
@@ -743,6 +843,14 @@ def approve_document(
             
             save_json(DOCUMENTS_FILE, documents)
             
+            # Record activity
+            record_activity(
+                user_id=current_user["user_id"],
+                client_id=doc["user_id"],
+                action="Approved document",
+                details=f"Document: {doc['filename']}"
+            )
+            
             # Notify client
             users = load_json(USERS_FILE)
             client = next((u for u in users if u["id"] == doc["user_id"]), None)
@@ -786,6 +894,14 @@ def reject_document(
             documents[i]["rejected_by"] = current_user["user_id"]
             
             save_json(DOCUMENTS_FILE, documents)
+            
+            # Record activity
+            record_activity(
+                user_id=current_user["user_id"],
+                client_id=doc["user_id"],
+                action="Rejected document",
+                details=f"Document: {doc['filename']}"
+            )
             
             # Notify client
             users = load_json(USERS_FILE)
@@ -894,6 +1010,272 @@ def list_messages(other_user_id: str, current_user: dict = Depends(verify_token)
 def startup_event():
     load_model()
     print("✅ SBERT model loaded successfully")
+@app.post("/api/contracts/share-with-client")
+
+async def share_contract_with_client(
+    file: UploadFile = File(...),
+    client_id: str = Form(""),
+    message: Optional[str] = Form(None),
+    current_user: dict = Depends(verify_token)
+):
+    if current_user["role"] not in ["admin", "legal_team"]:
+        raise HTTPException(status_code=403, detail="Only admin or legal team can share contracts")
+
+    # Validate file type
+    allowed_extensions = [".pdf", ".docx"]
+    file_ext = Path(file.filename).suffix.lower()
+    if file_ext not in allowed_extensions:
+        raise HTTPException(status_code=400, detail="Only PDF and DOCX files are allowed")
+
+    # Read file content
+    content = await file.read()
+
+    # Validate file size (10MB max)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="File size must be under 10MB")
+
+    # Save file locally
+    file_name = f"shared_{current_user['user_id']}_{uuid.uuid4().hex[:6]}_{file.filename}"
+    file_path = UPLOADS_DIR / file_name
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Try to upload to S3
+    s3_url = None
+    try:
+        if AWS_ACCESS_KEY and AWS_SECRET_KEY and BUCKET_NAME:
+            loop = asyncio.get_event_loop()
+            await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: s3_client.put_object(
+                        Bucket=BUCKET_NAME,
+                        Key=file_name,
+                        Body=content
+                    )
+                ),
+                timeout=30
+            )
+            s3_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
+            print(f"✅ Shared contract uploaded to S3: {file_name}")
+    except Exception as e:
+        print(f"⚠️ S3 upload failed for shared contract: {e}")
+
+    # Verify client exists
+    clients = load_json(CLIENTS_FILE)
+    client = next((c for c in clients if c["id"] == client_id), None)
+    if not client:
+        raise HTTPException(status_code=404, detail="Client not found")
+
+    # Save shared contract record
+    shared_contracts = load_json(SHARED_CONTRACTS_FILE)
+    contract_id = f"sc-{uuid.uuid4().hex[:8]}"
+    new_contract = {
+        "id": contract_id,
+        "filename": file.filename,
+        "document_type": file_ext.lstrip(".").upper(),
+        "client_id": client_id,
+        "shared_by": current_user["user_id"],
+        "shared_by_email": current_user["email"],
+        "message": message or "",
+        "size": len(content),
+        "status": "pending_review",
+        "shared_at": datetime.now().isoformat(),
+        "file_path": str(file_path),
+        "s3_key": file_name if s3_url else None,
+        "s3_url": s3_url
+    }
+    shared_contracts.append(new_contract)
+    save_json(SHARED_CONTRACTS_FILE, shared_contracts)
+
+    # Record activity
+    record_activity(
+        user_id=current_user["user_id"],
+        client_id=client_id,
+        action="Shared contract",
+        details=f"Contract: {file.filename}"
+    )
+
+    print(f"✅ Contract {file.filename} shared with client {client_id}")
+    return {"message": "Contract shared successfully", "contract": new_contract}
+
+
+    raise HTTPException(status_code=404, detail="Contract not found")
+
+
+@app.get("/api/contracts/from-legal")
+def get_contracts_from_legal(current_user: dict = Depends(verify_token)):
+    if current_user["role"] != "client":
+        raise HTTPException(status_code=403, detail="Only clients can access this endpoint")
+
+    shared_contracts = load_json(SHARED_CONTRACTS_FILE)
+    client_contracts = [
+        c for c in shared_contracts
+        if c.get("client_id") == current_user["user_id"]
+    ]
+    return {"contracts": client_contracts}
+
+
+@app.post("/api/contracts/accept/{contract_id}")
+def accept_shared_contract(
+    contract_id: str,
+    current_user: dict = Depends(verify_token)
+):
+    if current_user["role"] != "client":
+        raise HTTPException(status_code=403, detail="Only clients can accept contracts")
+
+    shared_contracts = load_json(SHARED_CONTRACTS_FILE)
+    for i, c in enumerate(shared_contracts):
+        if c["id"] == contract_id and c["client_id"] == current_user["user_id"]:
+            shared_contracts[i]["status"] = "accepted"
+            shared_contracts[i]["accepted_at"] = datetime.now().isoformat()
+            save_json(SHARED_CONTRACTS_FILE, shared_contracts)
+            
+            # Record activity
+            record_activity(
+                user_id=current_user["user_id"],
+                client_id=current_user["user_id"],
+                action="Accepted contract",
+                details=f"Contract: {c['filename']}"
+            )
+            
+            return {"message": "Contract accepted", "contract": shared_contracts[i]}
+
+    raise HTTPException(status_code=404, detail="Contract not found")
+
+
+@app.get("/api/activity/list")
+def list_activities(
+    client_id: Optional[str] = None,
+    current_user: dict = Depends(verify_token)
+):
+    activities = load_json(ACTIVITY_LOG_FILE)
+    
+    if current_user["role"] == "client":
+        # Clients only see their own activity
+        activities = [a for a in activities if a["client_id"] == current_user["user_id"]]
+    elif client_id:
+        # Admins can filter by client
+        activities = [a for a in activities if a["client_id"] == client_id]
+    
+    return {"activities": activities[:100]}  # Limit to 100 recent items
+
+
+@app.get("/api/contracts/download/{contract_id}")
+def download_shared_contract(
+    contract_id: str,
+    current_user: dict = Depends(verify_token)
+):
+    shared_contracts = load_json(SHARED_CONTRACTS_FILE)
+    contract = next((c for c in shared_contracts if c["id"] == contract_id), None)
+
+    if not contract:
+        raise HTTPException(status_code=404, detail="Contract not found")
+
+    # Only the intended client or the sharer can download
+    if current_user["role"] == "client" and contract["client_id"] != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    s3_key = contract.get("s3_key")
+    if s3_key:
+        try:
+            url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
+                ExpiresIn=3600
+            )
+            return {"download_url": url}
+        except ClientError as e:
+            print(f"S3 presigned URL error: {e}")
+
+    # Fallback: serve from local file
+    file_path = Path(contract.get("file_path", ""))
+    if file_path.exists():
+        from fastapi.responses import FileResponse
+        return FileResponse(
+            path=str(file_path),
+            filename=contract["filename"],
+            media_type="application/octet-stream"
+        )
+
+    raise HTTPException(status_code=404, detail="File not found on server")
+
+
+@app.post("/api/templates/upload")
+async def upload_template(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    template_type: str = Form(...), # NDA, RA, SOW, MSA
+    current_user: dict = Depends(verify_token)
+):
+    if current_user["role"] not in ["admin", "legal_team"]:
+        raise HTTPException(status_code=403, detail="Only legal team can upload templates")
+
+    # Save locally
+    file_name = f"legal_template_{template_type}_{uuid.uuid4().hex[:8]}_{file.filename}"
+    file_path = UPLOADS_DIR / file_name
+    
+    content = await file.read()
+    with open(file_path, "wb") as f:
+        f.write(content)
+
+    # Upload to S3
+    s3_url = None
+    try:
+        print(f"☁️ Uploading template {file_name} to S3...")
+        # Use loop.run_in_executor for blocking s3 call
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(
+            None,
+            lambda: s3_client.put_object(
+                Bucket=BUCKET_NAME,
+                Key=file_name,
+                Body=content
+            )
+        )
+        s3_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
+        print(f"✅ Template uploaded to S3")
+    except Exception as e:
+        print(f"❌ Template S3 Upload Error: {e}")
+
+    # Update templates.json
+    templates = load_json(TEMPLATES_FILE)
+    
+    new_template = {
+        "id": f"tmpl-{uuid.uuid4().hex[:8]}",
+        "filename": file.filename,
+        "template_type": template_type,
+        "uploaded_by": current_user["user_id"],
+        "uploaded_at": datetime.now().isoformat(),
+        "s3_url": s3_url,
+        "s3_key": file_name,
+        "file_path": str(file_path)
+    }
+    
+    # We keep all versions, frontend can pick the latest
+    templates.append(new_template)
+    save_json(TEMPLATES_FILE, templates)
+    
+    # Trigger automated extraction for templates
+    if s3_url:
+        background_tasks.add_task(trigger_extraction, file_name)
+        print(f"⚡ Queued background extraction for template {file_name}")
+    
+    # Record activity
+    record_activity(
+        user_id=current_user["user_id"],
+        client_id="admin", 
+        action="Uploaded Template",
+        details=f"Type: {template_type}, File: {file.filename}"
+    )
+    
+    return {"message": "Template uploaded successfully", "template": new_template}
+
+
+@app.get("/api/templates/list")
+def list_templates(current_user: dict = Depends(verify_token)):
+    templates = load_json(TEMPLATES_FILE)
+    return {"templates": templates}
 
 
 if __name__ == "__main__":

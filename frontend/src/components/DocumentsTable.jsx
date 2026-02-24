@@ -1,6 +1,8 @@
 import './DocumentsTable.css';
 
-function DocumentsTable({ documents, loading, onApprove, onShare, currentUser }) {
+const API_URL = 'http://localhost:8000';
+
+function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, currentUser, hideActions = false }) {
     const formatFileSize = (bytes) => {
         if (bytes === 0) return '0 Bytes';
         const k = 1024;
@@ -30,22 +32,50 @@ function DocumentsTable({ documents, loading, onApprove, onShare, currentUser })
         return colors[type] || '#6366f1';
     };
 
+    const handleDownload = async (docId) => {
+        if (onDownload) {
+            onDownload(docId);
+            return;
+        }
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/documents/download/${docId}`, {
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            const data = await res.json();
+            if (data.download_url) {
+                window.open(data.download_url, '_blank');
+            } else {
+                alert('Download failed: no URL returned');
+            }
+        } catch (err) {
+            console.error('Download error:', err);
+            alert('Download failed');
+        }
+    };
+
+    const isAdmin = currentUser?.role === 'admin' || currentUser?.role === 'legal_team';
+
+    const tableHead = (
+        <thead>
+            <tr>
+                <th>Document Name</th>
+                <th>Type</th>
+                <th>Upload Date</th>
+                <th>Status</th>
+                <th>Size</th>
+                {!hideActions && <th>Actions</th>}
+            </tr>
+        </thead>
+    );
+
     if (loading) {
         return (
             <table className="table">
-                <thead>
-                    <tr>
-                        <th>Document Name</th>
-                        <th>Type</th>
-                        <th>Upload Date</th>
-                        <th>Status</th>
-                        <th>Size</th>
-                        {currentUser?.role === 'admin' && <th>Actions</th>}
-                    </tr>
-                </thead>
+                {tableHead}
                 <tbody>
                     <tr>
-                        <td colSpan={currentUser?.role === 'admin' ? "6" : "5"} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <td colSpan={hideActions ? "5" : "6"} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                             Loading documents...
                         </td>
                     </tr>
@@ -57,19 +87,10 @@ function DocumentsTable({ documents, loading, onApprove, onShare, currentUser })
     if (documents.length === 0) {
         return (
             <table className="table">
-                <thead>
-                    <tr>
-                        <th>Document Name</th>
-                        <th>Type</th>
-                        <th>Upload Date</th>
-                        <th>Status</th>
-                        <th>Size</th>
-                        {currentUser?.role === 'admin' && <th>Actions</th>}
-                    </tr>
-                </thead>
+                {tableHead}
                 <tbody>
                     <tr>
-                        <td colSpan={currentUser?.role === 'admin' ? "6" : "5"} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
+                        <td colSpan={hideActions ? "5" : "6"} style={{ textAlign: 'center', color: 'var(--text-muted)' }}>
                             No documents uploaded yet. Upload your first document above!
                         </td>
                     </tr>
@@ -80,16 +101,7 @@ function DocumentsTable({ documents, loading, onApprove, onShare, currentUser })
 
     return (
         <table className="table">
-            <thead>
-                <tr>
-                    <th>Document Name</th>
-                    <th>Type</th>
-                    <th>Upload Date</th>
-                    <th>Status</th>
-                    <th>Size</th>
-                    {currentUser?.role === 'admin' && <th>Actions</th>}
-                </tr>
-            </thead>
+            {tableHead}
             <tbody>
                 {documents.map((doc) => {
                     const statusBadge = getStatusBadge(doc.status);
@@ -112,24 +124,33 @@ function DocumentsTable({ documents, loading, onApprove, onShare, currentUser })
                                 </span>
                             </td>
                             <td>{formatFileSize(doc.size)}</td>
-                            {currentUser?.role === 'admin' && (
+                            {!hideActions && (
                                 <td>
-                                    <div style={{ display: 'flex', gap: '0.5rem' }}>
-                                        {doc.status === 'pending' && (
+                                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                                        {isAdmin && (doc.status === 'pending' || doc.status === 'uploaded') && (
                                             <button
                                                 className="btn-action btn-approve"
-                                                onClick={() => onApprove(doc.id)}
+                                                onClick={() => onApprove && onApprove(doc.id)}
                                                 title="Approve Document"
                                             >
-                                                ✓
+                                                ✅
+                                            </button>
+                                        )}
+                                        {isAdmin && (doc.status === 'pending' || doc.status === 'uploaded') && (
+                                            <button
+                                                className="btn-action btn-reject"
+                                                onClick={() => onReject && onReject(doc.id)}
+                                                title="Reject Document"
+                                            >
+                                                ❌
                                             </button>
                                         )}
                                         <button
-                                            className="btn-action btn-share"
-                                            onClick={() => onShare(doc)}
-                                            title="Share Document"
+                                            className="btn-action btn-download"
+                                            onClick={() => handleDownload(doc.id)}
+                                            title="Download Document"
                                         >
-                                            📤
+                                            ⬇
                                         </button>
                                     </div>
                                 </td>

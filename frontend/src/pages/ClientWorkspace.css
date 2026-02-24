@@ -306,6 +306,249 @@
     padding: 0;
 }
 
+/* Share Tab */
+.share-section {
+    padding: 0;
+}
+
+.share-card {
+    padding: 2rem;
+}
+
+.share-dropzone {
+    border: 2px dashed #cbd5e1;
+    border-radius: 16px;
+    padding: 2.5rem 2rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.25s ease;
+    background: #f8fafc;
+    margin-bottom: 1.5rem;
+    min-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.share-dropzone:hover,
+.share-dropzone.dragging {
+    border-color: #2563EB;
+    background: #EFF6FF;
+}
+
+.share-dropzone.has-file {
+    border-color: #10b981;
+    background: #f0fdf4;
+    border-style: solid;
+}
+
+.share-dropzone-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.share-upload-icon {
+    font-size: 2.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.share-drop-text {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.share-drop-sub {
+    margin: 0;
+    color: #94a3b8;
+    font-size: 0.875rem;
+}
+
+.share-format-hint {
+    margin: 0.5rem 0 0;
+    font-size: 0.75rem;
+    color: #94a3b8;
+}
+
+.btn-browse {
+    padding: 0.5rem 1.25rem;
+    background: #2563EB;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.2s;
+    margin-top: 0.25rem;
+}
+
+.btn-browse:hover {
+    background: #1d4ed8;
+}
+
+.share-file-preview {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    width: 100%;
+    max-width: 480px;
+}
+
+.share-file-icon {
+    font-size: 2rem;
+    flex-shrink: 0;
+}
+
+.share-file-info {
+    flex: 1;
+    text-align: left;
+}
+
+.share-file-name {
+    display: block;
+    font-weight: 600;
+    color: #1e293b;
+    font-size: 0.9375rem;
+    word-break: break-all;
+}
+
+.share-file-size {
+    display: block;
+    font-size: 0.75rem;
+    color: #64748b;
+    margin-top: 0.25rem;
+}
+
+.share-file-remove {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid #e2e8f0;
+    background: white;
+    color: #ef4444;
+    font-size: 1.125rem;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+
+.share-file-remove:hover {
+    background: #fef2f2;
+    border-color: #ef4444;
+}
+
+.share-notes-section {
+    margin-bottom: 1.5rem;
+}
+
+.share-label {
+    display: block;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: #1e293b;
+    margin-bottom: 0.5rem;
+}
+
+.optional-label {
+    color: #94a3b8;
+    font-weight: 400;
+    margin-left: 0.25rem;
+}
+
+.share-textarea {
+    width: 100%;
+    padding: 0.75rem 1rem;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 0.9375rem;
+    color: #1e293b;
+    resize: vertical;
+    font-family: inherit;
+    background: #fafafa;
+    transition: border-color 0.2s;
+    box-sizing: border-box;
+}
+
+.share-textarea:focus {
+    outline: none;
+    border-color: #2563EB;
+    background: white;
+}
+
+.share-alert {
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    margin-bottom: 1rem;
+    font-weight: 500;
+}
+
+.share-alert-error {
+    background: #fef2f2;
+    color: #ef4444;
+    border: 1px solid #fecaca;
+}
+
+.share-alert-success {
+    background: #f0fdf4;
+    color: #10b981;
+    border: 1px solid #bbf7d0;
+}
+
+.share-actions {
+    display: flex;
+    gap: 1rem;
+    align-items: center;
+}
+
+.btn-send-client {
+    padding: 0.75rem 2rem;
+    background: #2563EB;
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-send-client:hover:not(:disabled) {
+    background: #1d4ed8;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);
+}
+
+.btn-send-client:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-cancel-share {
+    padding: 0.75rem 1.5rem;
+    background: #f1f5f9;
+    color: #475569;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-cancel-share:hover:not(:disabled) {
+    background: #e2e8f0;
+    color: #1e293b;
+}
+
 @media (max-width: 900px) {
     .client-summary-card {
         flex-direction: column;

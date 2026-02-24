@@ -69,6 +69,21 @@
     background: #f1f5f9;
 }
 
+.btn-approve:hover {
+    background: rgba(16, 185, 129, 0.1);
+    border-color: #10b981;
+}
+
+.btn-reject:hover {
+    background: rgba(239, 68, 68, 0.1);
+    border-color: #ef4444;
+}
+
+.btn-download:hover {
+    background: rgba(37, 99, 235, 0.1);
+    border-color: #2563EB;
+}
+
 .doc-link:hover {
     text-decoration: underline;
 }
