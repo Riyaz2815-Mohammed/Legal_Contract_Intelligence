@@ -152,8 +152,19 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, c
                                         >
                                             ⬇
                                         </button>
+                                        {doc.document_type !== 'Redlined' && (
+                                            <a
+                                                href={`/analysis/${doc.id}`}
+                                                className="btn-action btn-analysis"
+                                                title="AI Analysis"
+                                                style={{ textDecoration: 'none', fontSize: '1.2rem' }}
+                                            >
+                                                🔍
+                                            </a>
+                                        )}
                                     </div>
                                 </td>
+
                             )}
                         </tr>
                     );
