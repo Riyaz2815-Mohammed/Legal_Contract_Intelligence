@@ -29,7 +29,7 @@ const Sidebar = ({ user, onLogout, isCollapsed, onToggle }) => {
                     {!isCollapsed && <span>Dashboard</span>}
                 </NavLink>
 
-                {user?.role === 'admin' && (
+                {(user?.role === 'admin' || user?.role === 'legal_team') && (
                     <>
                         <NavLink to="/legal-team" className={({ isActive }) => isActive ? 'nav-item active' : 'nav-item'} title="Legal Team">
                             <svg className="nav-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">

@@ -9,6 +9,7 @@ import InviteClient from './pages/InviteClient';
 import TemplatesPage from './pages/TemplatesPage';
 import DocumentAnalysis from './pages/DocumentAnalysis';
 import TemplateAnalysis from './pages/TemplateAnalysis';
+import ClauseReview from './pages/ClauseReview';
 import './App.css';
 
 
@@ -63,7 +64,7 @@ function App() {
           <Route
             path="/workspace/:clientId"
             element={
-              isAuthenticated && user?.role === 'admin' ?
+              isAuthenticated && (user?.role === 'admin' || user?.role === 'legal_team') ?
                 <ClientWorkspace user={user} onLogout={handleLogout} /> :
                 <Navigate to="/login" />
             }
@@ -71,7 +72,7 @@ function App() {
           <Route
             path="/legal-team"
             element={
-              isAuthenticated && user?.role === 'admin' ?
+              isAuthenticated && (user?.role === 'admin' || user?.role === 'legal_team') ?
                 <LegalTeam user={user} onLogout={handleLogout} /> :
                 <Navigate to="/login" />
             }
@@ -87,7 +88,7 @@ function App() {
           <Route
             path="/invite-client"
             element={
-              isAuthenticated && user?.role === 'admin' ?
+              isAuthenticated && (user?.role === 'admin' || user?.role === 'legal_team') ?
                 <InviteClient user={user} onLogout={handleLogout} /> :
                 <Navigate to="/login" />
             }
@@ -113,6 +114,14 @@ function App() {
             element={
               isAuthenticated && (user?.role === 'admin' || user?.role === 'legal_team') ?
                 <TemplateAnalysis user={user} onLogout={handleLogout} /> :
+                <Navigate to="/login" />
+            }
+          />
+          <Route
+            path="/review/:documentId"
+            element={
+              isAuthenticated ?
+                <ClauseReview user={user} onLogout={handleLogout} /> :
                 <Navigate to="/login" />
             }
           />

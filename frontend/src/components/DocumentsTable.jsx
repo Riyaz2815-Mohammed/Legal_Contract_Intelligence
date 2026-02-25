@@ -153,14 +153,13 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, c
                                             ⬇
                                         </button>
                                         {doc.document_type !== 'Redlined' && (
-                                            <a
-                                                href={`/analysis/${doc.id}`}
-                                                className="btn-action btn-analysis"
-                                                title="AI Analysis"
-                                                style={{ textDecoration: 'none', fontSize: '1.2rem' }}
+                                            <button
+                                                className="btn-action btn-review"
+                                                onClick={() => window.location.href = `/review/${doc.id}`}
+                                                title="Review AI Analysis & Risk"
                                             >
-                                                🔍
-                                            </a>
+                                                Review
+                                            </button>
                                         )}
                                     </div>
                                 </td>

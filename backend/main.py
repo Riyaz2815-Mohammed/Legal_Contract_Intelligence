@@ -294,8 +294,8 @@ def login(request: LoginRequest):
 
 @app.post("/api/clients/create")
 def create_client(client: ClientCreate, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can create clients")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only legal team can create clients")
     
     # Generate unique ID and random password
     client_id = f"client-{uuid.uuid4().hex[:8]}"
@@ -385,8 +385,8 @@ def create_client(client: ClientCreate, current_user: dict = Depends(verify_toke
 
 @app.post("/api/legal/create")
 def create_legal_team_member(member: LegalTeamMemberCreate, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can create legal team members")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only legal team can create members")
     
     # Generate unique ID and random password
     member_id = f"legal-{uuid.uuid4().hex[:8]}"
@@ -467,8 +467,8 @@ def list_legal_team(current_user: dict = Depends(verify_token)):
 
 @app.delete("/api/legal/delete/{member_id}")
 def delete_legal_team_member(member_id: str, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can delete legal team members")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only legal team can delete members")
     
     # Load data
     legal_team = load_json(LEGAL_TEAM_FILE)
@@ -494,20 +494,20 @@ def delete_legal_team_member(member_id: str, current_user: dict = Depends(verify
 
 @app.get("/api/clients/list")
 def list_clients(current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can view clients")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only legal team can view clients")
     
     clients = load_json(CLIENTS_FILE)
     return {"clients": clients}
 
 @app.delete("/api/clients/delete/{client_id}")
 def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can delete clients")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only admins or legal team can delete clients")
     
     # Load data
-    clients = load_json(CLIENTS_FILE)
-    users = load_json(USERS_FILE)
+    clients   = load_json(CLIENTS_FILE)
+    users     = load_json(USERS_FILE)
     documents = load_json(DOCUMENTS_FILE)
     
     # Find client
@@ -515,39 +515,58 @@ def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     
-    # Remove client from clients list
+    # ── 1. Remove client & user records ──────────────────────────
     clients = [c for c in clients if c["id"] != client_id]
     save_json(CLIENTS_FILE, clients)
     
-    # Remove user account
     users = [u for u in users if u["id"] != client_id]
     save_json(USERS_FILE, users)
     
-    # Remove client's documents
+    # ── 2. Delete all client documents ───────────────────────────
     client_docs = [d for d in documents if d["user_id"] == client_id]
     for doc in client_docs:
-        # Delete physical file
+        # Delete local file
         try:
             file_path = Path(doc["file_path"])
             if file_path.exists():
                 file_path.unlink()
         except Exception as e:
-            print(f"Error deleting file: {e}")
-            
-        # Delete from S3
-        try:
-            s3_key = doc.get("s3_key")
-            if s3_key:
+            print(f"⚠️ Local file delete error: {e}")
+
+        # Delete from S3 — catch all exceptions, not just ClientError
+        s3_key = doc.get("s3_key")
+        if s3_key:
+            try:
                 print(f"☁️ Deleting {s3_key} from S3...")
-                s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
-                print(f"✅ Successfully deleted from S3")
-        except ClientError as e:
-            print(f"❌ S3 Delete Error: {e}")
-    
+                resp = s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+                status_code = resp.get("ResponseMetadata", {}).get("HTTPStatusCode", 0)
+                if status_code in (200, 204):
+                    print(f"✅ S3 deleted: {s3_key}")
+                else:
+                    print(f"⚠️ S3 delete returned unexpected status {status_code} for {s3_key}")
+            except Exception as e:
+                print(f"❌ S3 Delete Error for {s3_key}: {e}")
+
+        # Delete review file if present
+        try:
+            review_path = DATA_DIR / "reviews" / f"{doc['id']}.json"
+            if review_path.exists():
+                review_path.unlink()
+        except Exception:
+            pass
+
     # Remove documents from list
     documents = [d for d in documents if d["user_id"] != client_id]
     save_json(DOCUMENTS_FILE, documents)
-    
+
+    # ── 3. Clean up shared_contracts ─────────────────────────────
+    try:
+        shared = load_json(DATA_DIR / "shared_contracts.json")
+        shared = [c for c in shared if c.get("client_id") != client_id]
+        save_json(DATA_DIR / "shared_contracts.json", shared)
+    except Exception:
+        pass
+
     return {
         "message": "Client deleted successfully",
         "client": client,
@@ -555,62 +574,144 @@ def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
     }
 
 
-def trigger_extraction(file_name: str, client_id: Optional[str] = None, document_type: str = "Unknown", is_standard: bool = False):
-    """Background task: perform extraction and classification locally."""
+def trigger_extraction(
+    file_name: str,
+    client_id: Optional[str] = None,
+    document_type: str = "Unknown",
+    is_standard: bool = False,
+    document_id: Optional[str] = None,
+):
+    """
+    Background task: extract text → classify clauses → SBERT embed.
+    - is_standard=True  → store embeddings in ChromaDB (standard template flow)
+    - is_standard=False → query ChromaDB, compute similarity, tag risk, save review JSON
+    """
     try:
-        # Ensure extracter directory is in path
+        # Ensure extracter directory is in sys.path
         backend_dir = Path(__file__).parent
         project_root = backend_dir.parent
         extracter_dir = project_root / "extracter"
-        
+
         if str(extracter_dir) not in sys.path:
             sys.path.append(str(extracter_dir))
-        
-        # Import extraction logic (lazy import to resolve at runtime)
+
         from extract import extract_text_from_file
         from clause_engine import parse_text_file, process_document
-        
-        # Local path for the file (it's already saved in UPLOADS_DIR)
+
         local_path = UPLOADS_DIR / file_name
         if not local_path.exists():
-            # If not in uploads, maybe check data/uploads? (UPLOADS_DIR is data/uploads)
-            print(f"❌ [Background] File not found for extraction at {local_path}")
+            print(f"❌ [Background] File not found at {local_path}")
             return
 
         print(f"⚡ [Background] Starting extraction for {file_name}...")
-        
-        # 1. Extract text (PDF, DOCX, TXT)
+
+        # ── Step 1: Extract raw text ──────────────────────────────────────────
         extracted_text = extract_text_from_file(str(local_path))
-        
-        # 2. Save .txt version to extracted_texts folder
+
+        # ── Step 2: Persist extracted text ────────────────────────────────────
         base_name = Path(file_name).stem
-        txt_filename = base_name + ".txt"
-        json_filename = base_name + ".json"
-        
         extract_docs_dir = extracter_dir / "extracted_texts"
         extract_docs_dir.mkdir(parents=True, exist_ok=True)
-        
-        txt_path = extract_docs_dir / txt_filename
-        json_path = extract_docs_dir / json_filename
-        
+
+        txt_path  = extract_docs_dir / (base_name + ".txt")
+        json_path = extract_docs_dir / (base_name + ".json")
+
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(extracted_text)
-        print(f"📝 [Background] Saved extracted text to {txt_path}")
-        
-        # 3. Classify and structured results as JSON
-        # Note: parse_text_file expects a file path
+        print(f"📝 [Background] Saved text to {txt_path}")
+
+        # ── Step 3: Classify clauses ──────────────────────────────────────────
         raw_blocks = parse_text_file(str(txt_path))
-        results = process_document(
-            raw_blocks, 
-            client_id=client_id, 
-            document_type=document_type, 
-            is_standard=is_standard
+        clauses = process_document(
+            raw_blocks,
+            client_id=client_id,
+            document_type=document_type,
+            is_standard=is_standard,
         )
-        
+
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2)
-            
-        print(f"✅ [Background] Classification complete: {len(results)} clauses saved to {json_path}")
+            json.dump(clauses, f, indent=2)
+        print(f"✅ [Background] {len(clauses)} clauses classified → {json_path}")
+
+        # ── Step 4: SBERT Embeddings ──────────────────────────────────────────
+        try:
+            from embeddings.embedder import embed_texts
+            texts = [c.get("content", "") for c in clauses]
+            embeddings = embed_texts(texts)
+            print(f"🔢 [Background] Embedded {len(embeddings)} clauses")
+        except Exception as emb_err:
+            print(f"⚠️ [Background] Embedding failed: {emb_err}")
+            embeddings = []
+
+        # Attach embeddings to clause records
+        for i, clause in enumerate(clauses):
+            clause["embedding"] = embeddings[i] if i < len(embeddings) else []
+
+        # ── Step 5a (Standard Template): Store in ChromaDB ────────────────────
+        if is_standard:
+            try:
+                from vector.clause_store import store_clauses
+                stored = store_clauses(clauses, document_type=document_type)
+                print(f"📦 [Background] Stored {stored} clause embeddings in ChromaDB")
+            except Exception as store_err:
+                print(f"⚠️ [Background] ChromaDB store failed: {store_err}")
+            return  # Standard template pipeline ends here
+
+        # ── Step 5b (Client Document): Query + Similarity + Risk ──────────────
+        try:
+            from vector.clause_store import query_similar
+            from similarity.matcher import best_similarity
+            from risk.risk_engine import tag_risk
+
+            reviews_dir = DATA_DIR / "reviews"
+            reviews_dir.mkdir(parents=True, exist_ok=True)
+
+            review_clauses = []
+            for clause in clauses:
+                emb = clause.get("embedding", [])
+                hits = query_similar(emb, top_k=3) if emb else []
+                score = best_similarity(emb, hits)
+                risk  = tag_risk(score)
+
+                top_match = hits[0] if hits else None
+
+                review_clauses.append({
+                    "content_id":          clause.get("content_id"),
+                    "clause_id":           clause.get("clause_id"),
+                    "clause_type":         clause.get("clause", "Other"),
+                    "content":             clause.get("content", ""),
+                    "page_number":         clause.get("page_number"),
+                    "document_type":       document_type,
+                    "risk":                risk,
+                    "similarity_score":    round(score, 4) if score is not None else None,
+                    "matched_clause": {
+                        "content_id":    top_match["content_id"]    if top_match else None,
+                        "clause_type":   top_match["clause_type"]   if top_match else None,
+                        "content":       top_match["content"]       if top_match else None,
+                        "document_type": top_match["document_type"] if top_match else None,
+                        "similarity":    top_match["similarity"]    if top_match else None,
+                    } if top_match else None,
+                    "status": "pending",   # pending | accepted | rejected
+                })
+
+            # Resolve document_id for persisting the review file
+            resolved_doc_id = document_id
+            if not resolved_doc_id:
+                # Try to find it from documents.json by file_name
+                docs = load_json(DOCUMENTS_FILE)
+                match = next((d for d in docs if d.get("s3_key") == file_name), None)
+                resolved_doc_id = match["id"] if match else base_name
+
+            review_path = reviews_dir / f"{resolved_doc_id}.json"
+            with open(review_path, "w", encoding="utf-8") as f:
+                json.dump(review_clauses, f, indent=2)
+
+            print(f"🎯 [Background] Risk review saved for doc {resolved_doc_id}: {review_path}")
+
+        except Exception as risk_err:
+            import traceback
+            print(f"⚠️ [Background] Risk assessment failed: {risk_err}")
+            print(traceback.format_exc())
 
     except Exception as e:
         import traceback
@@ -708,7 +809,8 @@ async def upload_document(
             file_name, 
             client_id=current_user['user_id'], 
             document_type=document_type, 
-            is_standard=False
+            is_standard=False,
+            document_id=new_doc["id"],
         )
         print(f"⚡ Queued background extraction for {file_name}")
     else:
@@ -960,8 +1062,8 @@ def list_documents(current_user: dict = Depends(verify_token)):
 
 @app.get("/api/documents/stats")
 def document_stats(current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can view stats")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only legal team can view stats")
     
     documents = load_json(DOCUMENTS_FILE)
     
@@ -1360,6 +1462,142 @@ def download_template(
 def list_templates(current_user: dict = Depends(verify_token)):
     templates = load_json(TEMPLATES_FILE)
     return {"templates": templates}
+
+
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Review Endpoints
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/documents/review/{document_id}")
+def get_document_review(
+    document_id: str,
+    current_user: dict = Depends(verify_token)
+):
+    """
+    Return the risk-tagged clause review for a document.
+    Falls back to the basic analysis JSON if a review file doesn't exist yet.
+    """
+    documents = load_json(DOCUMENTS_FILE)
+    doc = next((d for d in documents if d["id"] == document_id), None)
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    # Access control
+    if current_user["role"] == "client" and doc["user_id"] != current_user["user_id"]:
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    # Primary: risk review file
+    reviews_dir = DATA_DIR / "reviews"
+    review_path = reviews_dir / f"{document_id}.json"
+
+    if review_path.exists():
+        try:
+            with open(review_path, "r", encoding="utf-8") as f:
+                clauses = json.load(f)
+            return {"document": doc, "clauses": clauses, "status": "complete"}
+        except Exception as e:
+            print(f"❌ Error reading review file: {e}")
+
+    # Fallback: basic analysis JSON (no risk scores yet)
+    s3_key = doc.get("s3_key")
+    if s3_key:
+        base = Path(s3_key).stem
+        extracter_dir = Path(__file__).parent.parent / "extracter" / "extracted_texts"
+        fallback = extracter_dir / f"{base}.json"
+        if fallback.exists():
+            try:
+                with open(fallback, "r", encoding="utf-8") as f:
+                    clauses = json.load(f)
+                return {"document": doc, "clauses": clauses, "status": "processing"}
+            except Exception:
+                pass
+
+    return {"document": doc, "clauses": [], "status": "processing"}
+
+
+class ClauseActionRequest(BaseModel):
+    content_id: str
+    action: str   # "accept" | "reject"
+
+
+@app.post("/api/documents/review/{document_id}/action")
+def clause_action(
+    document_id: str,
+    req: ClauseActionRequest,
+    current_user: dict = Depends(verify_token)
+):
+    """Accept or reject a specific clause in the review."""
+    if req.action not in ("accept", "reject"):
+        raise HTTPException(status_code=400, detail="action must be 'accept' or 'reject'")
+
+    documents = load_json(DOCUMENTS_FILE)
+    doc = next((d for d in documents if d["id"] == document_id), None)
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    reviews_dir = DATA_DIR / "reviews"
+    review_path = reviews_dir / f"{document_id}.json"
+
+    if not review_path.exists():
+        raise HTTPException(status_code=404, detail="Review not ready yet — please wait for processing")
+
+    with open(review_path, "r", encoding="utf-8") as f:
+        clauses = json.load(f)
+
+    updated = False
+    for clause in clauses:
+        if clause.get("content_id") == req.content_id:
+            clause["status"] = "accepted" if req.action == "accept" else "rejected"
+            updated = True
+            break
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Clause not found")
+
+    with open(review_path, "w", encoding="utf-8") as f:
+        json.dump(clauses, f, indent=2)
+
+    return {"message": f"Clause {req.action}ed", "content_id": req.content_id}
+
+
+class AskLLMRequest(BaseModel):
+    content_id: str
+    question: str
+
+
+@app.post("/api/documents/review/{document_id}/ask-llm")
+def ask_llm_about_clause(
+    document_id: str,
+    req: AskLLMRequest,
+    current_user: dict = Depends(verify_token)
+):
+    """Ask the LLM a question about a specific clause in the review."""
+    reviews_dir = DATA_DIR / "reviews"
+    review_path = reviews_dir / f"{document_id}.json"
+
+    if not review_path.exists():
+        raise HTTPException(status_code=404, detail="Review not available yet")
+
+    with open(review_path, "r", encoding="utf-8") as f:
+        clauses = json.load(f)
+
+    clause = next((c for c in clauses if c.get("content_id") == req.content_id), None)
+    if not clause:
+        raise HTTPException(status_code=404, detail="Clause not found")
+
+    try:
+        from llm.reasoner import ask_llm
+        answer = ask_llm(
+            clause_text=clause.get("content", ""),
+            clause_type=clause.get("clause_type", "Other"),
+            question=req.question,
+        )
+        return {"answer": answer, "content_id": req.content_id}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
 
 
 if __name__ == "__main__":

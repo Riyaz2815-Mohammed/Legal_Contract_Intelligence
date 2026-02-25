@@ -59,5 +59,20 @@
     "s3_key": null,
     "s3_url": null,
     "accepted_at": "2026-02-24T22:42:52.108002"
+  },
+  {
+    "id": "sc-1d2d1ffe",
+    "filename": "Bill_Buddy_User_and_Task_Analysis.docx",
+    "document_type": "DOCX",
+    "client_id": "client-0c599bf9",
+    "shared_by": "legal-101af0d8",
+    "shared_by_email": "nand.71772317133@gct.ac.in",
+    "message": "just for cjbfjh",
+    "size": 28246,
+    "status": "pending_review",
+    "shared_at": "2026-02-25T19:10:29.317246",
+    "file_path": "data\\uploads\\shared_legal-101af0d8_0e0e57_Bill_Buddy_User_and_Task_Analysis.docx",
+    "s3_key": "shared_legal-101af0d8_0e0e57_Bill_Buddy_User_and_Task_Analysis.docx",
+    "s3_url": "https://laccis.s3.eu-north-1.amazonaws.com/shared_legal-101af0d8_0e0e57_Bill_Buddy_User_and_Task_Analysis.docx"
   }
 ]
