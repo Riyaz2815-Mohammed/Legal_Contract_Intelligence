@@ -294,8 +294,8 @@ def login(request: LoginRequest):
 
 @app.post("/api/clients/create")
 def create_client(client: ClientCreate, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can create clients")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only legal team can create clients")
     
     # Generate unique ID and random password
     client_id = f"client-{uuid.uuid4().hex[:8]}"
@@ -385,8 +385,8 @@ def create_client(client: ClientCreate, current_user: dict = Depends(verify_toke
 
 @app.post("/api/legal/create")
 def create_legal_team_member(member: LegalTeamMemberCreate, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can create legal team members")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only legal team can create members")
     
     # Generate unique ID and random password
     member_id = f"legal-{uuid.uuid4().hex[:8]}"
@@ -467,8 +467,8 @@ def list_legal_team(current_user: dict = Depends(verify_token)):
 
 @app.delete("/api/legal/delete/{member_id}")
 def delete_legal_team_member(member_id: str, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can delete legal team members")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only legal team can delete members")
     
     # Load data
     legal_team = load_json(LEGAL_TEAM_FILE)
@@ -494,20 +494,20 @@ def delete_legal_team_member(member_id: str, current_user: dict = Depends(verify
 
 @app.get("/api/clients/list")
 def list_clients(current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can view clients")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only legal team can view clients")
     
     clients = load_json(CLIENTS_FILE)
     return {"clients": clients}
 
 @app.delete("/api/clients/delete/{client_id}")
 def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can delete clients")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only admins or legal team can delete clients")
     
     # Load data
-    clients = load_json(CLIENTS_FILE)
-    users = load_json(USERS_FILE)
+    clients   = load_json(CLIENTS_FILE)
+    users     = load_json(USERS_FILE)
     documents = load_json(DOCUMENTS_FILE)
     
     # Find client
@@ -515,39 +515,58 @@ def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
     if not client:
         raise HTTPException(status_code=404, detail="Client not found")
     
-    # Remove client from clients list
+    # ── 1. Remove client & user records ──────────────────────────
     clients = [c for c in clients if c["id"] != client_id]
     save_json(CLIENTS_FILE, clients)
     
-    # Remove user account
     users = [u for u in users if u["id"] != client_id]
     save_json(USERS_FILE, users)
     
-    # Remove client's documents
+    # ── 2. Delete all client documents ───────────────────────────
     client_docs = [d for d in documents if d["user_id"] == client_id]
     for doc in client_docs:
-        # Delete physical file
+        # Delete local file
         try:
             file_path = Path(doc["file_path"])
             if file_path.exists():
                 file_path.unlink()
         except Exception as e:
-            print(f"Error deleting file: {e}")
-            
-        # Delete from S3
-        try:
-            s3_key = doc.get("s3_key")
-            if s3_key:
+            print(f"⚠️ Local file delete error: {e}")
+
+        # Delete from S3 — catch all exceptions, not just ClientError
+        s3_key = doc.get("s3_key")
+        if s3_key:
+            try:
                 print(f"☁️ Deleting {s3_key} from S3...")
-                s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
-                print(f"✅ Successfully deleted from S3")
-        except ClientError as e:
-            print(f"❌ S3 Delete Error: {e}")
-    
+                resp = s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+                status_code = resp.get("ResponseMetadata", {}).get("HTTPStatusCode", 0)
+                if status_code in (200, 204):
+                    print(f"✅ S3 deleted: {s3_key}")
+                else:
+                    print(f"⚠️ S3 delete returned unexpected status {status_code} for {s3_key}")
+            except Exception as e:
+                print(f"❌ S3 Delete Error for {s3_key}: {e}")
+
+        # Delete review file if present
+        try:
+            review_path = DATA_DIR / "reviews" / f"{doc['id']}.json"
+            if review_path.exists():
+                review_path.unlink()
+        except Exception:
+            pass
+
     # Remove documents from list
     documents = [d for d in documents if d["user_id"] != client_id]
     save_json(DOCUMENTS_FILE, documents)
-    
+
+    # ── 3. Clean up shared_contracts ─────────────────────────────
+    try:
+        shared = load_json(DATA_DIR / "shared_contracts.json")
+        shared = [c for c in shared if c.get("client_id") != client_id]
+        save_json(DATA_DIR / "shared_contracts.json", shared)
+    except Exception:
+        pass
+
     return {
         "message": "Client deleted successfully",
         "client": client,
@@ -1043,8 +1062,8 @@ def list_documents(current_user: dict = Depends(verify_token)):
 
 @app.get("/api/documents/stats")
 def document_stats(current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can view stats")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only legal team can view stats")
     
     documents = load_json(DOCUMENTS_FILE)
     

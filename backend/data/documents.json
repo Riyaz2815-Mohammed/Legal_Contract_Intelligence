@@ -1,17 +1,1 @@
-[
-  {
-    "id": "doc-1",
-    "filename": "mutualnda.pdf",
-    "document_type": "Others",
-    "user_id": "client-adb2f928",
-    "user_email": "saravanavel.1136@gmail.com",
-    "user_role": "client",
-    "size": 98915,
-    "status": "uploaded",
-    "shared_with": [],
-    "uploaded_at": "2026-02-23T19:05:57.801797",
-    "file_path": "data\\uploads\\client-adb2f928_mutualnda.pdf",
-    "s3_url": "https://laccis.s3.eu-north-1.amazonaws.com/client-adb2f928_mutualnda.pdf",
-    "s3_key": "client-adb2f928_mutualnda.pdf"
-  }
-]
+[]
