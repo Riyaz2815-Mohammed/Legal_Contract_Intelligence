@@ -1,0 +1,468 @@
+/* ================================================================
+   ClauseReview.css — Premium dark review page for LACCIS
+   ================================================================ */
+
+.review-page {
+    min-height: 100vh;
+    padding: 2rem;
+    color: #e2e8f0;
+}
+
+/* ── Header ──────────────────────────────────────────────────── */
+.review-header {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+}
+
+.review-header h1 {
+    font-size: 1.75rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, #6366f1, #a78bfa);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin: 0;
+}
+
+.btn-back-review {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #94a3b8;
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.875rem;
+    text-decoration: none;
+    transition: background 0.2s, color 0.2s;
+}
+
+.btn-back-review:hover {
+    background: rgba(255, 255, 255, 0.14);
+    color: #e2e8f0;
+}
+
+/* ── Document info bar ───────────────────────────────────────── */
+.review-doc-bar {
+    display: flex;
+    gap: 2rem;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 1.25rem 2rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+}
+
+.review-doc-bar .info-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.review-doc-bar .info-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+}
+
+.review-doc-bar .info-value {
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: #e2e8f0;
+}
+
+/* ── Summary pills ───────────────────────────────────────────── */
+.risk-summary {
+    display: flex;
+    gap: 1rem;
+    margin-bottom: 2rem;
+    flex-wrap: wrap;
+}
+
+.risk-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 1rem;
+    border-radius: 999px;
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+.risk-pill.high {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.risk-pill.medium {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border: 1px solid rgba(245, 158, 11, 0.3);
+}
+
+.risk-pill.low {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+/* ── Clause card grid ────────────────────────────────────────── */
+.review-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+    gap: 1.5rem;
+}
+
+/* ── Individual clause card ──────────────────────────────────── */
+.clause-review-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 14px;
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    transition: transform 0.2s, border-color 0.2s;
+    position: relative;
+    overflow: hidden;
+}
+
+.clause-review-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 4px;
+    height: 100%;
+}
+
+.clause-review-card.risk-high {
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.clause-review-card.risk-high::before {
+    background: #ef4444;
+}
+
+.clause-review-card.risk-medium {
+    border-color: rgba(245, 158, 11, 0.35);
+}
+
+.clause-review-card.risk-medium::before {
+    background: #f59e0b;
+}
+
+.clause-review-card.risk-low {
+    border-color: rgba(16, 185, 129, 0.35);
+}
+
+.clause-review-card.risk-low::before {
+    background: #10b981;
+}
+
+.clause-review-card.status-accepted {
+    opacity: 0.6;
+}
+
+.clause-review-card.status-rejected {
+    opacity: 0.5;
+}
+
+.clause-review-card:hover {
+    transform: translateY(-2px);
+}
+
+/* ── Card header ─────────────────────────────────────────────── */
+.card-header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.clause-type-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.3rem 0.75rem;
+    border-radius: 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+}
+
+.risk-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.78rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+}
+
+.risk-badge.high {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+}
+
+.risk-badge.medium {
+    background: rgba(245, 158, 11, 0.2);
+    color: #fbbf24;
+}
+
+.risk-badge.low {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+}
+
+.status-chip {
+    padding: 0.25rem 0.65rem;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.status-chip.accepted {
+    background: rgba(16, 185, 129, 0.2);
+    color: #34d399;
+}
+
+.status-chip.rejected {
+    background: rgba(239, 68, 68, 0.2);
+    color: #f87171;
+}
+
+.status-chip.pending {
+    background: rgba(100, 116, 139, 0.2);
+    color: #94a3b8;
+}
+
+/* ── Content ─────────────────────────────────────────────────── */
+.clause-content-text {
+    font-size: 0.87rem;
+    line-height: 1.65;
+    color: #cbd5e1;
+    display: -webkit-box;
+    -webkit-line-clamp: 5;
+    line-clamp: 5;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.clause-content-text.expanded {
+    -webkit-line-clamp: unset;
+}
+
+.btn-toggle-expand {
+    align-self: flex-start;
+    background: none;
+    border: none;
+    color: #6366f1;
+    font-size: 0.78rem;
+    cursor: pointer;
+    padding: 0;
+    text-decoration: underline;
+}
+
+/* ── Matched clause preview ──────────────────────────────────── */
+.matched-clause-box {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    padding: 0.85rem 1rem;
+}
+
+.matched-clause-label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: #64748b;
+    margin-bottom: 0.4rem;
+}
+
+.matched-clause-text {
+    font-size: 0.8rem;
+    color: #94a3b8;
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+}
+
+.similarity-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-top: 0.5rem;
+}
+
+.similarity-bar-wrap {
+    flex: 1;
+    height: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.similarity-bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 0.6s ease;
+}
+
+.similarity-score-text {
+    font-size: 0.72rem;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+/* ── Action buttons ──────────────────────────────────────────── */
+.card-actions {
+    display: flex;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+    margin-top: auto;
+}
+
+.btn-accept,
+.btn-reject,
+.btn-ask-llm {
+    flex: 1;
+    min-width: 80px;
+    padding: 0.55rem 0.75rem;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    transition: opacity 0.2s, transform 0.1s;
+}
+
+.btn-accept:hover,
+.btn-reject:hover,
+.btn-ask-llm:hover {
+    opacity: 0.85;
+    transform: translateY(-1px);
+}
+
+.btn-accept:disabled,
+.btn-reject:disabled,
+.btn-ask-llm:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-accept {
+    background: linear-gradient(135deg, #059669, #10b981);
+    color: white;
+}
+
+.btn-reject {
+    background: linear-gradient(135deg, #b91c1c, #ef4444);
+    color: white;
+}
+
+.btn-ask-llm {
+    background: rgba(99, 102, 241, 0.25);
+    color: #a78bfa;
+    border: 1px solid rgba(99, 102, 241, 0.4);
+}
+
+/* ── Ask LLM panel ───────────────────────────────────────────── */
+.llm-panel {
+    background: rgba(99, 102, 241, 0.08);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 10px;
+    padding: 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.llm-panel textarea {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 7px;
+    color: #e2e8f0;
+    padding: 0.6rem 0.8rem;
+    font-size: 0.83rem;
+    resize: vertical;
+    min-height: 68px;
+    font-family: inherit;
+}
+
+.llm-panel textarea:focus {
+    outline: none;
+    border-color: #6366f1;
+}
+
+.btn-submit-llm {
+    background: #6366f1;
+    color: white;
+    border: none;
+    border-radius: 7px;
+    padding: 0.5rem 1rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    align-self: flex-end;
+    transition: opacity 0.2s;
+}
+
+.btn-submit-llm:hover {
+    opacity: 0.88;
+}
+
+.btn-submit-llm:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.llm-answer {
+    font-size: 0.83rem;
+    line-height: 1.65;
+    color: #c4b5fd;
+    background: rgba(99, 102, 241, 0.06);
+    border-radius: 7px;
+    padding: 0.75rem;
+    white-space: pre-wrap;
+}
+
+/* ── Loading / empty states ──────────────────────────────────── */
+.review-processing {
+    text-align: center;
+    padding: 5rem 2rem;
+    color: #64748b;
+}
+
+.review-processing .spinner {
+    width: 42px;
+    height: 42px;
+    border: 3px solid rgba(99, 102, 241, 0.2);
+    border-top-color: #6366f1;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    margin: 0 auto 1.5rem;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

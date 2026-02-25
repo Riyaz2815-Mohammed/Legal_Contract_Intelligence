@@ -9,6 +9,7 @@ import InviteClient from './pages/InviteClient';
 import TemplatesPage from './pages/TemplatesPage';
 import DocumentAnalysis from './pages/DocumentAnalysis';
 import TemplateAnalysis from './pages/TemplateAnalysis';
+import ClauseReview from './pages/ClauseReview';
 import './App.css';
 
 
@@ -113,6 +114,14 @@ function App() {
             element={
               isAuthenticated && (user?.role === 'admin' || user?.role === 'legal_team') ?
                 <TemplateAnalysis user={user} onLogout={handleLogout} /> :
+                <Navigate to="/login" />
+            }
+          />
+          <Route
+            path="/review/:documentId"
+            element={
+              isAuthenticated ?
+                <ClauseReview user={user} onLogout={handleLogout} /> :
                 <Navigate to="/login" />
             }
           />
