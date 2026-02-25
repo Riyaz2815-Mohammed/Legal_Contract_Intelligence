@@ -30,5 +30,13 @@
     "password": "1h02iWNJJImUlV1G",
     "role": "legal_team",
     "created_at": "2026-02-25T18:53:26.933246"
+  },
+  {
+    "id": "client-0c599bf9",
+    "name": "saravana",
+    "email": "saravanavel.1136@gmail.com",
+    "password": "LACCIS-72E656",
+    "role": "client",
+    "created_at": "2026-02-25T19:05:28.969065"
   }
 ]

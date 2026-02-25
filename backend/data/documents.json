@@ -1,1 +1,17 @@
-[]
+[
+  {
+    "id": "doc-1",
+    "filename": "mutualnda.pdf",
+    "document_type": "Others",
+    "user_id": "client-0c599bf9",
+    "user_email": "saravanavel.1136@gmail.com",
+    "user_role": "client",
+    "size": 98915,
+    "status": "uploaded",
+    "shared_with": [],
+    "uploaded_at": "2026-02-25T19:07:19.581085",
+    "file_path": "data\\uploads\\client-0c599bf9_mutualnda.pdf",
+    "s3_url": "https://laccis.s3.eu-north-1.amazonaws.com/client-0c599bf9_mutualnda.pdf",
+    "s3_key": "client-0c599bf9_mutualnda.pdf"
+  }
+]

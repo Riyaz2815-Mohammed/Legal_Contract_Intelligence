@@ -12,5 +12,12 @@
     "recipient_id": "client-2",
     "content": "hi ",
     "timestamp": "2026-02-20T18:52:35.225124"
+  },
+  {
+    "id": "msg-3-c6bff765",
+    "sender_id": "legal-101af0d8",
+    "recipient_id": "client-0c599bf9",
+    "content": "hi saravana you are in love???",
+    "timestamp": "2026-02-25T19:10:57.669879"
   }
 ]
