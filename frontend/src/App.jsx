@@ -60,7 +60,7 @@ function App() {
           <Route
             path="/workspace/:clientId"
             element={
-              isAuthenticated && user?.role === 'admin' ?
+              isAuthenticated && (user?.role === 'admin' || user?.role === 'legal_team') ?
                 <ClientWorkspace user={user} onLogout={handleLogout} /> :
                 <Navigate to="/login" />
             }
@@ -68,7 +68,7 @@ function App() {
           <Route
             path="/legal-team"
             element={
-              isAuthenticated && user?.role === 'admin' ?
+              isAuthenticated && (user?.role === 'admin' || user?.role === 'legal_team') ?
                 <LegalTeam user={user} onLogout={handleLogout} /> :
                 <Navigate to="/login" />
             }
@@ -84,7 +84,7 @@ function App() {
           <Route
             path="/invite-client"
             element={
-              isAuthenticated && user?.role === 'admin' ?
+              isAuthenticated && (user?.role === 'admin' || user?.role === 'legal_team') ?
                 <InviteClient user={user} onLogout={handleLogout} /> :
                 <Navigate to="/login" />
             }

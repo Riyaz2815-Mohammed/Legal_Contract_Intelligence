@@ -86,7 +86,7 @@ const DocumentAnalysis = ({ user, onLogout }) => {
         <Layout user={user} onLogout={onLogout} pageTitle="Document Analysis">
             <div className="analysis-container">
                 <div className="analysis-header">
-                    <Link to={user.role === 'admin' ? `/workspace/${document.user_id}` : '/dashboard'} className="btn-back">
+                    <Link to={(user.role === 'admin' || user.role === 'legal_team') ? `/workspace/${document.user_id}` : '/dashboard'} className="btn-back">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <line x1="19" y1="12" x2="5" y2="12"></line>
                             <polyline points="12 19 5 12 12 5"></polyline>

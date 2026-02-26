@@ -1,0 +1,162 @@
+-- =============================================================
+-- LACCIS – PostgreSQL Schema
+-- Legal Clause Classification Intelligence System
+-- =============================================================
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- =============================================================
+-- USERS
+-- Stores all users: admin, legal_team, client
+-- =============================================================
+CREATE TABLE users (
+    id            TEXT        PRIMARY KEY,              -- e.g. admin-1, legal-abc, client-xyz
+    name          TEXT        NOT NULL,
+    email         TEXT        NOT NULL UNIQUE,
+    password_hash TEXT        NOT NULL,                 -- store bcrypt hash, NOT plaintext
+    role          TEXT        NOT NULL                  -- 'admin' | 'legal_team' | 'client'
+                  CHECK (role IN ('admin', 'legal_team', 'client')),
+    created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Index for fast login lookup
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_role  ON users(role);
+
+
+-- =============================================================
+-- DOCUMENTS
+-- All uploaded files: client NDAs, legal templates, etc.
+-- =============================================================
+CREATE TABLE documents (
+    id              TEXT        PRIMARY KEY,            -- e.g. doc-1
+    filename        TEXT        NOT NULL,
+    document_type   TEXT        NOT NULL                -- 'NDA' | 'MSA' | 'SOW' | 'RA' | 'Redlined' | 'Others' | 'template'
+                    CHECK (document_type IN ('NDA','MSA','SOW','RA','Redlined','Others','template')),
+    user_id         TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    user_email      TEXT        NOT NULL,
+    user_role       TEXT        NOT NULL,
+    size            BIGINT      DEFAULT 0,
+    status          TEXT        NOT NULL DEFAULT 'uploaded'
+                    CHECK (status IN ('pending','uploaded','approved','rejected')),
+    shared_with     JSONB       NOT NULL DEFAULT '[]',  -- array of user_ids or 'admin'
+    uploaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    file_path       TEXT,
+    s3_url          TEXT,
+    s3_key          TEXT,
+    -- Template extra fields (null for non-templates)
+    template_type   TEXT,                              -- 'NDA' | 'RA' | 'MSA' | 'SOW'
+    -- Approval / rejection audit trail
+    approved_at     TIMESTAMPTZ,
+    approved_by     TEXT        REFERENCES users(id),
+    rejected_at     TIMESTAMPTZ,
+    rejected_by     TEXT        REFERENCES users(id)
+);
+
+CREATE INDEX idx_documents_user_id       ON documents(user_id);
+CREATE INDEX idx_documents_status        ON documents(status);
+CREATE INDEX idx_documents_document_type ON documents(document_type);
+
+
+-- =============================================================
+-- CLAUSES
+-- Extracted & classified clauses from processed documents
+-- =============================================================
+CREATE TABLE clauses (
+    clause_id    TEXT        PRIMARY KEY,               -- CLZ-XXXXXXXX
+    clause       TEXT        NOT NULL,                  -- 'Confidentiality', 'Termination', etc.
+    content_id   TEXT        NOT NULL UNIQUE,           -- CNT-XXXXXXXX
+    content      TEXT        NOT NULL,
+    page_number  INT         NOT NULL DEFAULT 1,
+    document     TEXT        NOT NULL,                  -- document_type label: NDA, MSA ...
+    source       TEXT        NOT NULL                   -- 'client' | 'legal'
+                 CHECK (source IN ('client', 'legal', 'unknown')),
+    document_id  TEXT        REFERENCES documents(id) ON DELETE SET NULL,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_clauses_document_id ON clauses(document_id);
+CREATE INDEX idx_clauses_clause      ON clauses(clause);
+
+
+-- =============================================================
+-- MESSAGES
+-- 1-on-1 private chat between users
+-- =============================================================
+CREATE TABLE messages (
+    id           TEXT        PRIMARY KEY,               -- msg-N-RANDOMHEX
+    sender_id    TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    recipient_id TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    content      TEXT        NOT NULL,
+    timestamp    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_messages_sender    ON messages(sender_id);
+CREATE INDEX idx_messages_recipient ON messages(recipient_id);
+-- Fast 1-on-1 conversation fetch
+CREATE INDEX idx_messages_convo ON messages(
+    LEAST(sender_id, recipient_id),
+    GREATEST(sender_id, recipient_id)
+);
+
+
+-- =============================================================
+-- SHARED_CONTRACTS
+-- Legal team → client contract sharing
+-- =============================================================
+CREATE TABLE shared_contracts (
+    id              TEXT        PRIMARY KEY,            -- sc-XXXXXXXX
+    filename        TEXT        NOT NULL,
+    document_type   TEXT,                              -- derived from file extension
+    client_id       TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    shared_by       TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    shared_by_email TEXT        NOT NULL,
+    message         TEXT,
+    size            BIGINT      DEFAULT 0,
+    status          TEXT        NOT NULL DEFAULT 'pending_review'
+                    CHECK (status IN ('pending_review', 'accepted', 'rejected')),
+    shared_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    accepted_at     TIMESTAMPTZ,
+    file_path       TEXT,
+    s3_key          TEXT,
+    s3_url          TEXT
+);
+
+CREATE INDEX idx_shared_contracts_client_id  ON shared_contracts(client_id);
+CREATE INDEX idx_shared_contracts_shared_by  ON shared_contracts(shared_by);
+CREATE INDEX idx_shared_contracts_status     ON shared_contracts(status);
+
+
+-- =============================================================
+-- ACTIVITY_LOG
+-- Audit trail for all significant actions
+-- =============================================================
+CREATE TABLE activity_log (
+    id         TEXT        PRIMARY KEY,                 -- act-XXXXXXXX
+    user_id    TEXT        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    client_id  TEXT,                                   -- which client this action concerns
+    action     TEXT        NOT NULL,
+    details    TEXT        DEFAULT '',
+    timestamp  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX idx_activity_user_id   ON activity_log(user_id);
+CREATE INDEX idx_activity_client_id ON activity_log(client_id);
+CREATE INDEX idx_activity_timestamp ON activity_log(timestamp DESC);
+
+
+-- =============================================================
+-- SEED: default admin user (password should be hashed via bcrypt)
+-- Replace 'REPLACE_WITH_BCRYPT_HASH' with actual hash in production
+-- =============================================================
+INSERT INTO users (id, name, email, password_hash, role, created_at)
+VALUES (
+    'admin-1',
+    'Legal Team Admin',
+    'admin@laccis.com',
+    'admin123',   -- TODO: replace with bcrypt hash before deploying
+    'admin',
+    NOW()
+)
+ON CONFLICT (email) DO NOTHING;

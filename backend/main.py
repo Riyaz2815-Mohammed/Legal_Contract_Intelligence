@@ -18,7 +18,7 @@ from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
-import requests
+from supabase import create_client, Client, ClientOptions
 from embeddings.sbert_model import load_model
 
 app = FastAPI(title="LACCIS API", description="Legal Clause Classification Intelligence System")
@@ -37,19 +37,12 @@ security = HTTPBearer()
 SECRET_KEY = "your-secret-key-change-in-production"
 ALGORITHM = "HS256"
 
-# Data storage (use database in production)
+# Data storage
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(exist_ok=True)
-USERS_FILE = DATA_DIR / "users.json"
-CLIENTS_FILE = DATA_DIR / "clients.json"
-LEGAL_TEAM_FILE = DATA_DIR / "legal_team.json"
-DOCUMENTS_FILE = DATA_DIR / "documents.json"
-MESSAGES_FILE = DATA_DIR / "messages.json"
-SHARED_CONTRACTS_FILE = DATA_DIR / "shared_contracts.json"
-ACTIVITY_LOG_FILE = DATA_DIR / "activity_log.json"
-TEMPLATES_FILE = DATA_DIR / "standard_templates.json"
 UPLOADS_DIR = DATA_DIR / "uploads"
 UPLOADS_DIR.mkdir(exist_ok=True)
+
 
 # Load environment variables                
 load_dotenv()
@@ -63,6 +56,30 @@ AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
 AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 AWS_REGION = os.getenv("REGION")
 BUCKET_NAME = os.getenv("BUCKET_NAME")
+
+# Supabase Configuration
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+
+# Initialize Supabase Client
+supabase: Client = None
+if SUPABASE_URL and SUPABASE_KEY:
+    try:
+        # Initialize with a timeout if possible (using httpx options)
+        from httpx import Timeout
+        supabase = create_client(
+            SUPABASE_URL, 
+            SUPABASE_KEY,
+            options=ClientOptions(
+                postgrest_client_timeout=Timeout(10.0),
+                storage_client_timeout=Timeout(10.0)
+            )
+        )
+        print("[SUPABASE] Supabase client initialized")
+    except Exception as e:
+        print(f"[ERROR] Supabase initialization failed: {e}")
+else:
+    print("[SUPABASE] Supabase credentials missing")
 
 # Initialize S3 Client with timeouts to prevent infinite hang
 s3_client = boto3.client(
@@ -78,12 +95,12 @@ s3_client = boto3.client(
 )
 
 # Debug: Print if credentials are loaded
-print(f"✓ EMAILJS_SERVICE_ID loaded: {bool(EMAILJS_SERVICE_ID)}")
-print(f"✓ EMAILJS_TEMPLATE_ID loaded: {bool(EMAILJS_TEMPLATE_ID)}")
-print(f"✓ EMAILJS_PUBLIC_KEY loaded: {bool(EMAILJS_PUBLIC_KEY)}")
-print(f"✓ AWS_ACCESS_KEY loaded: {bool(AWS_ACCESS_KEY)} | value starts with: {AWS_ACCESS_KEY[:4] if AWS_ACCESS_KEY else 'MISSING'}")
-print(f"✓ AWS_REGION: {AWS_REGION}")
-print(f"✓ BUCKET_NAME: {BUCKET_NAME}")
+print(f"[AWS/EMAIL] EMAILJS_SERVICE_ID loaded: {bool(EMAILJS_SERVICE_ID)}")
+print(f"[AWS/EMAIL] EMAILJS_TEMPLATE_ID loaded: {bool(EMAILJS_TEMPLATE_ID)}")
+print(f"[AWS/EMAIL] EMAILJS_PUBLIC_KEY loaded: {bool(EMAILJS_PUBLIC_KEY)}")
+print(f"[AWS/EMAIL] AWS_ACCESS_KEY loaded: {bool(AWS_ACCESS_KEY)} | value starts with: {AWS_ACCESS_KEY[:4] if AWS_ACCESS_KEY else 'MISSING'}")
+print(f"[AWS/EMAIL] AWS_REGION: {AWS_REGION}")
+print(f"[AWS/EMAIL] BUCKET_NAME: {BUCKET_NAME}")
 
 # Models
 class LoginRequest(BaseModel):
@@ -124,35 +141,21 @@ class Message(BaseModel):
     timestamp: str
 
 # Helper functions
-def load_json(file_path):
-    if file_path.exists():
-        try:
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read()
-                if not content.strip():
-                    return []
-                return json.loads(content)
-        except Exception as e:
-            print(f"ERROR loading {file_path}: {e}")
-            return []
-    return []
-
-def save_json(file_path, data):
-    with open(file_path, 'w', encoding='utf-8') as f:
-        json.dump(data, f, indent=2)
-
 def record_activity(user_id: str, client_id: str, action: str, details: str = ""):
-    activities = load_json(ACTIVITY_LOG_FILE)
-    activities.insert(0, {
-        "id": f"act-{uuid.uuid4().hex[:8]}",
-        "user_id": user_id,
-        "client_id": client_id,
-        "action": action,
-        "details": details,
-        "timestamp": datetime.now().isoformat()
-    })
-    # Keep last 500 activities
-    save_json(ACTIVITY_LOG_FILE, activities[:500])
+
+    if supabase:
+        try:
+            supabase.table("activity_log").insert({
+                "id": f"act-{uuid.uuid4().hex[:8]}",
+                "user_id": user_id,
+                "client_id": client_id,
+                "action": action,
+                "details": details,
+                "timestamp": datetime.now().isoformat()
+            }).execute()
+        except Exception as e:
+            print(f"[ERROR] Supabase record_activity error: {e}")
+
 
 def create_token(user_id: str, email: str, role: str):
     payload = {
@@ -250,88 +253,75 @@ def send_email(to_email: str, subject: str, body: str):
         print(f"✗ {error_msg}")
         return {'success': False, 'message': error_msg}
 
-# Initialize default admin user
-def init_default_users():
-    users = load_json(USERS_FILE)
-    if not users:
-        admin = {
-            "id": "admin-1",
-            "name": "Legal Team Admin",
-            "email": "admin@laccis.com",
-            "password": "admin123",  # Change in production!
-            "role": "admin",
-            "created_at": datetime.now().isoformat()
-        }
-        save_json(USERS_FILE, [admin])
-
-init_default_users()
-
 # Routes
+
 @app.get("/")
 def root():
     return {"message": "LACCIS API is running", "version": "1.0.0"}
 
 @app.post("/api/auth/login")
 def login(request: LoginRequest):
-    users = load_json(USERS_FILE)
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
     
-    user = next((u for u in users if u["email"] == request.email), None)
-    
-    if not user or user["password"] != request.password:
+    try:
+        response = supabase.table("users").select("*").eq("email", request.email).execute()
+        if not response.data:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
+        
+        user = response.data[0]
+        # Direct password comparison (plaintext as currently used)
+        if user.get("password") == request.password or user.get("password_hash") == request.password:
+            token = create_token(user["id"], user["email"], user["role"])
+            record_activity(user["id"], user["id"], "Logged in")
+            return {
+                "token": token,
+                "user": {
+                    "id": user["id"],
+                    "name": user["name"],
+                    "email": user["email"],
+                    "role": user["role"]
+                }
+            }
         raise HTTPException(status_code=401, detail="Invalid credentials")
-    
-    token = create_token(user["id"], user["email"], user["role"])
-    
-    return {
-        "token": token,
-        "user": {
-            "id": user["id"],
-            "name": user["name"],
-            "email": user["email"],
-            "role": user["role"]
-        }
-    }
+    except Exception as e:
+        print(f"[ERROR] Login error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/clients/create")
 def create_client(client: ClientCreate, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can create clients")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only admins and legal team members can create clients")
     
-    # Generate unique ID and random password
     client_id = f"client-{uuid.uuid4().hex[:8]}"
     random_suffix = secrets.token_hex(3).upper()
     password = f"LACCIS-{random_suffix}"
     
     # Create client user
     users = load_json(USERS_FILE)
-    clients = load_json(CLIENTS_FILE)
-    
-    # Check if email already exists
     if any(u["email"] == client.email for u in users):
         raise HTTPException(status_code=400, detail="Email already exists")
     
+    created_at = datetime.now().isoformat()
     new_user = {
         "id": client_id,
         "name": client.name,
         "email": client.email,
         "password": password,
         "role": "client",
-        "created_at": datetime.now().isoformat()
+        "created_at": created_at
     }
     
+    # Supabase Integration
+    if supabase:
+        try:
+            supabase.table("users").insert(new_user).execute()
+        except Exception as e:
+            print(f"Supabase client create error: {e}")
+
     users.append(new_user)
     save_json(USERS_FILE, users)
-    
-    # Save client info
-    new_client = {
-        "id": client_id,
-        "name": client.name,
-        "email": client.email,
-        "created_at": datetime.now().isoformat()
-    }
-    
-    clients.append(new_client)
-    save_json(CLIENTS_FILE, clients)
     
     # Load and customize email template
     try:
@@ -346,34 +336,13 @@ def create_client(client: ClientCreate, current_user: dict = Depends(verify_toke
     except Exception as e:
         print(f"Error loading template: {e}")
         # Fallback to basic email
-        email_body = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
-            <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px;">
-                <h2 style="color: #6366f1;">Welcome to LACCIS</h2>
-                <p>Hello {client.name},</p>
-                <p>Your account has been created for the Legal Clause Classification Intelligence System.</p>
-                
-                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                    <h3 style="margin-top: 0;">Your Login Credentials:</h3>
-                    <p><strong>Email:</strong> {client.email}</p>
-                    <p><strong>Password:</strong> {password}</p>
-                </div>
-                
-                <p>You can now log in and upload your contract documents for analysis.</p>
-                <p><a href="http://localhost:5173" style="background: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin-top: 10px;">Login to LACCIS</a></p>
-                
-                <p style="color: #666; font-size: 12px; margin-top: 30px;">Please keep your credentials secure and do not share them with anyone.</p>
-            </div>
-        </body>
-        </html>
-        """
+        email_body = f"<html><body><h2>Welcome {client.name}</h2><p>Password: {password}</p></body></html>"
     
     email_sent = send_email(client.email, "Your LACCIS Login Credentials", email_body)
     
     return {
         "message": "Client created successfully",
-        "client": new_client,
+        "client": {"id": client_id, "name": client.name, "email": client.email, "created_at": created_at},
         "email_sent": email_sent['success'],
         "email_message": email_sent['message'],
         "credentials": {
@@ -385,73 +354,43 @@ def create_client(client: ClientCreate, current_user: dict = Depends(verify_toke
 
 @app.post("/api/legal/create")
 def create_legal_team_member(member: LegalTeamMemberCreate, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can create legal team members")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only admins and legal team members can create legal team members")
     
-    # Generate unique ID and random password
     member_id = f"legal-{uuid.uuid4().hex[:8]}"
     password = secrets.token_urlsafe(12)
     
-    # Create legal team user
     users = load_json(USERS_FILE)
-    legal_team = load_json(LEGAL_TEAM_FILE)
-    
-    # Check if email already exists
     if any(u["email"] == member.email for u in users):
         raise HTTPException(status_code=400, detail="Email already exists")
     
+    created_at = datetime.now().isoformat()
     new_user = {
         "id": member_id,
         "name": member.name,
         "email": member.email,
         "password": password,
         "role": "legal_team",
-        "created_at": datetime.now().isoformat()
+        "created_at": created_at
     }
     
+    # Supabase Integration
+    if supabase:
+        try:
+            supabase.table("users").insert(new_user).execute()
+        except Exception as e:
+            print(f"Supabase legal team member create error: {e}")
+
     users.append(new_user)
     save_json(USERS_FILE, users)
     
-    # Save legal team info
-    new_member = {
-        "id": member_id,
-        "name": member.name,
-        "email": member.email,
-        "created_at": datetime.now().isoformat()
-    }
-    
-    legal_team.append(new_member)
-    save_json(LEGAL_TEAM_FILE, legal_team)
-    
     # Send email with credentials
-    email_body = f"""
-    <html>
-    <body style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
-        <div style="max-width: 600px; margin: 0 auto; background: white; padding: 30px; border-radius: 10px;">
-            <h2 style="color: #6366f1;">Welcome to LACCIS Legal Team</h2>
-            <p>Hello {member.name},</p>
-            <p>Your account has been created for the Legal Clause Classification Intelligence System.</p>
-            
-            <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin: 20px 0;">
-                <h3 style="margin-top: 0;">Your Login Credentials:</h3>
-                <p><strong>Email:</strong> {member.email}</p>
-                <p><strong>Password:</strong> {password}</p>
-            </div>
-            
-            <p>You can now log in to review contracts.</p>
-            <p><a href="http://localhost:5173" style="background: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin-top: 10px;">Login to LACCIS</a></p>
-            
-            <p style="color: #666; font-size: 12px; margin-top: 30px;">Please keep your credentials secure and do not share them with anyone.</p>
-        </div>
-    </body>
-    </html>
-    """
-    
+    email_body = f"<html><body><h2>Welcome {member.name}</h2><p>Password: {password}</p></body></html>"
     email_sent = send_email(member.email, "LACCIS Legal Team Account", email_body)
     
     return {
         "message": "Legal team member created successfully",
-        "member": new_member,
+        "member": {"id": member_id, "name": member.name, "email": member.email, "created_at": created_at},
         "email_sent": email_sent,
         "credentials": {
             "email": member.email,
@@ -461,155 +400,157 @@ def create_legal_team_member(member: LegalTeamMemberCreate, current_user: dict =
 
 @app.get("/api/legal/list")
 def list_legal_team(current_user: dict = Depends(verify_token)):
-    # Allowed for both admin and client roles to facilitate chat
-    legal_team = load_json(LEGAL_TEAM_FILE)
-    return {"members": legal_team}
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        response = supabase.table("users").select("id, name, email, created_at").eq("role", "legal_team").execute()
+        return {"members": response.data}
+    except Exception as e:
+        print(f"[ERROR] Supabase legal list error: {e}")
+        return {"members": []}
+
 
 @app.delete("/api/legal/delete/{member_id}")
 def delete_legal_team_member(member_id: str, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can delete legal team members")
-    
-    # Load data
-    legal_team = load_json(LEGAL_TEAM_FILE)
-    users = load_json(USERS_FILE)
-    
-    # Find member
-    member = next((m for m in legal_team if m["id"] == member_id), None)
-    if not member:
-        raise HTTPException(status_code=404, detail="Legal team member not found")
-    
-    # Remove from legal team list
-    legal_team = [m for m in legal_team if m["id"] != member_id]
-    save_json(LEGAL_TEAM_FILE, legal_team)
-    
-    # Remove user account
-    users = [u for u in users if u["id"] != member_id]
-    save_json(USERS_FILE, users)
-    
-    return {
-        "message": "Legal team member deleted successfully",
-        "member": member
-    }
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        supabase.table("users").delete().eq("id", member_id).execute()
+        return {"message": "Legal team member deleted successfully"}
+    except Exception as e:
+        print(f"[ERROR] Supabase legal delete error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/clients/list")
 def list_clients(current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can view clients")
-    
-    clients = load_json(CLIENTS_FILE)
-    return {"clients": clients}
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        response = supabase.table("users").select("id, name, email, created_at").eq("role", "client").execute()
+        return {"clients": response.data}
+    except Exception as e:
+        print(f"[ERROR] Supabase client list error: {e}")
+        return {"clients": []}
+
 
 @app.delete("/api/clients/delete/{client_id}")
 def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can delete clients")
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Only admins and legal team members can delete clients")
     
-    # Load data
-    clients = load_json(CLIENTS_FILE)
+    if supabase:
+        try:
+            supabase.table("users").delete().eq("id", client_id).execute()
+        except Exception as e:
+            print(f"Supabase client delete error: {e}")
+
     users = load_json(USERS_FILE)
     documents = load_json(DOCUMENTS_FILE)
     
-    # Find client
-    client = next((c for c in clients if c["id"] == client_id), None)
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-    
-    # Remove client from clients list
-    clients = [c for c in clients if c["id"] != client_id]
-    save_json(CLIENTS_FILE, clients)
-    
-    # Remove user account
-    users = [u for u in users if u["id"] != client_id]
-    save_json(USERS_FILE, users)
-    
-    # Remove client's documents
-    client_docs = [d for d in documents if d["user_id"] == client_id]
-    for doc in client_docs:
-        # Delete physical file
-        try:
-            file_path = Path(doc["file_path"])
-            if file_path.exists():
-                file_path.unlink()
-        except Exception as e:
-            print(f"Error deleting file: {e}")
-            
-        # Delete from S3
-        try:
+@app.delete("/api/clients/delete/{client_id}")
+def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+
+    try:
+        # 1. Fetch client docs for cleanup
+        res = supabase.table("documents").select("*").eq("user_id", client_id).execute()
+        docs = res.data if res.data else []
+        
+        # 2. Cleanup S3 and local files
+        for doc in docs:
+            # S3
             s3_key = doc.get("s3_key")
             if s3_key:
-                print(f"☁️ Deleting {s3_key} from S3...")
-                s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
-                print(f"✅ Successfully deleted from S3")
-        except ClientError as e:
-            print(f"❌ S3 Delete Error: {e}")
-    
-    # Remove documents from list
-    documents = [d for d in documents if d["user_id"] != client_id]
-    save_json(DOCUMENTS_FILE, documents)
-    
-    return {
-        "message": "Client deleted successfully",
-        "client": client,
-        "documents_deleted": len(client_docs)
-    }
+                try: 
+                    s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+                except Exception as e: 
+                    print(f"[ERROR] S3 cleanup error: {e}")
+            # Local
+            try:
+                fp = Path(doc.get("file_path", ""))
+                if fp.exists(): fp.unlink()
+            except Exception as e:
+                print(f"[ERROR] Local file cleanup error: {e}")
+
+        # 3. Delete from Supabase (Cascade usually handles docs, but we can be explicit if needed)
+        # Note: If schema has cascade, we just delete user. If not, we delete docs first.
+        supabase.table("documents").delete().eq("user_id", client_id).execute()
+        supabase.table("users").delete().eq("id", client_id).execute()
+        
+        return {"message": "Client and associated documents deleted", "documents_cleaned": len(docs)}
+    except Exception as e:
+        print(f"[ERROR] Supabase client delete error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
-def trigger_extraction(file_name: str):
-    """Background task: perform extraction and classification locally."""
+
+def trigger_extraction(file_name: str, document_type: str = "Unknown", source: str = "unknown"):
+    """Background task: perform extraction and classification locally.
+
+    Args:
+        file_name     : saved filename under data/uploads/
+        document_type : e.g. "NDA", "MSA", "SOW" — stored in every clause record
+        source        : "client" or "legal" — who uploaded the document
+    """
     try:
         # Ensure extracter directory is in path
         backend_dir = Path(__file__).parent
         project_root = backend_dir.parent
         extracter_dir = project_root / "extracter"
-        
+
         if str(extracter_dir) not in sys.path:
             sys.path.append(str(extracter_dir))
-        
+
         # Import extraction logic (lazy import to resolve at runtime)
         from extract import extract_text_from_file
         from clause_engine import parse_text_file, process_document
-        
+
         # Local path for the file (it's already saved in UPLOADS_DIR)
         local_path = UPLOADS_DIR / file_name
         if not local_path.exists():
-            # If not in uploads, maybe check data/uploads? (UPLOADS_DIR is data/uploads)
-            print(f"❌ [Background] File not found for extraction at {local_path}")
+            print(f"[ERROR] [Background] File not found for extraction at {local_path}")
             return
 
-        print(f"⚡ [Background] Starting extraction for {file_name}...")
-        
+        print(f"[INFO] [Background] Starting extraction for {file_name} (doc={document_type}, src={source})...")
+
         # 1. Extract text (PDF, DOCX, TXT)
         extracted_text = extract_text_from_file(str(local_path))
-        
+
         # 2. Save .txt version to extracted_texts folder
         base_name = Path(file_name).stem
         txt_filename = base_name + ".txt"
         json_filename = base_name + ".json"
-        
+
         extract_docs_dir = extracter_dir / "extracted_texts"
         extract_docs_dir.mkdir(parents=True, exist_ok=True)
-        
+
         txt_path = extract_docs_dir / txt_filename
         json_path = extract_docs_dir / json_filename
-        
+
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write(extracted_text)
-        print(f"📝 [Background] Saved extracted text to {txt_path}")
-        
-        # 3. Classify and structured results as JSON
-        # Note: parse_text_file expects a file path
+        print(f"[INFO] [Background] Saved extracted text to {txt_path}")
+
+        # 3. Classify — pass document type and source so every clause record is fully tagged
         raw_blocks = parse_text_file(str(txt_path))
-        results = process_document(raw_blocks)
-        
+        results = process_document(raw_blocks, document=document_type, source=source)
+
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2)
-            
-        print(f"✅ [Background] Classification complete: {len(results)} clauses saved to {json_path}")
+            json.dump(results, f, indent=2, ensure_ascii=False)
+
+        print(f"[SUCCESS] [Background] Classification complete: {len(results)} clauses saved to {json_path}")
 
     except Exception as e:
         import traceback
-        print(f"❌ [Background] Extraction failed for {file_name}")
+        print(f"[ERROR] [Background] Extraction failed for {file_name}")
         print(traceback.format_exc())
 
 
@@ -636,7 +577,7 @@ async def upload_document(
     try:
         if not AWS_ACCESS_KEY or not AWS_SECRET_KEY or not BUCKET_NAME:
             raise ValueError(f"Missing AWS config — KEY:{bool(AWS_ACCESS_KEY)} SECRET:{bool(AWS_SECRET_KEY)} BUCKET:{bool(BUCKET_NAME)}")
-        print(f"☁️ Uploading {file_name} to S3 bucket: {BUCKET_NAME} (region: {AWS_REGION})...")
+        print(f"[AWS] Uploading {file_name} to S3 bucket: {BUCKET_NAME} (region: {AWS_REGION})...")
         loop = asyncio.get_event_loop()
         await asyncio.wait_for(
             loop.run_in_executor(
@@ -649,35 +590,33 @@ async def upload_document(
             ),
             timeout=30  # give up after 30 seconds
         )
-        print(f"✅ Successfully uploaded to S3")
+        print(f"[SUCCESS] Successfully uploaded to S3")
         s3_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
     except asyncio.TimeoutError:
-        print(f"❌ S3 Upload timed out after 30s — check bucket region/permissions")
+        print(f"[ERROR] S3 Upload timed out after 30s — check bucket region/permissions")
         s3_url = None
     except ClientError as e:
         error_code = e.response['Error']['Code']
         error_msg = e.response['Error']['Message']
-        print(f"❌ S3 Upload Error [{error_code}]: {error_msg}")
+        print(f"[ERROR] S3 Upload Error [{error_code}]: {error_msg}")
         s3_url = None
     except Exception as e:
-        print(f"❌ S3 Upload Unexpected Error: {type(e).__name__}: {e}")
+        print(f"[ERROR] S3 Upload Unexpected Error: {type(e).__name__}: {e}")
         s3_url = None
-    
-    # Save document metadata
-    documents = load_json(DOCUMENTS_FILE)
     
     # Determine status based on document type
     status = "pending" if document_type == "NDA" else "uploaded"
+    doc_uuid = f"doc-{uuid.uuid4().hex[:8]}"
     
     new_doc = {
-        "id": f"doc-{len(documents) + 1}",
+        "id": doc_uuid,
         "filename": file.filename,
         "document_type": document_type,
         "user_id": current_user["user_id"],
         "user_email": current_user["email"],
         "user_role": current_user["role"],
         "size": len(content),
-        "status": status,  # pending, approved, rejected, uploaded
+        "status": status,
         "shared_with": shared_with if shared_with else [],
         "uploaded_at": datetime.now().isoformat(),
         "file_path": str(file_path),
@@ -685,9 +624,15 @@ async def upload_document(
         "s3_key": file_name
     }
     
-    documents.append(new_doc)
-    save_json(DOCUMENTS_FILE, documents)
-    
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not connected")
+        
+    try:
+        supabase.table("documents").insert(new_doc).execute()
+    except Exception as e:
+        print(f"[ERROR] Supabase document upload error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save metadata")
+
     # Record activity
     record_activity(
         user_id=current_user["user_id"],
@@ -696,68 +641,62 @@ async def upload_document(
         details=f"Document: {file.filename} ({document_type})"
     )
     
-    # Trigger automated extraction in background for all documents
+    # Trigger automated extraction in background
+    source = "client" if current_user["role"] == "client" else "legal"
     if s3_url:
-        background_tasks.add_task(trigger_extraction, file_name)
-        print(f"⚡ Queued background extraction for {file_name}")
-
-    # Notify admin if client uploaded NDA
-    if document_type == "NDA" and current_user["role"] == "client":
-        # In production, send email notification to admin
-        pass
+        background_tasks.add_task(trigger_extraction, file_name, document_type, source)
     
     return {
-        "message": "Document uploaded successfully and queued for extraction",
+        "message": "Document uploaded and queued for extraction",
         "document": new_doc
     }
 
+
 @app.get("/api/documents/analysis/{document_id}")
-def get_document_analysis(
-    document_id: str,
-    current_user: dict = Depends(verify_token)
-):
-    documents = load_json(DOCUMENTS_FILE)
-    doc = next((d for d in documents if d["id"] == document_id), None)
-    
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+def get_document_analysis(document_id: str, current_user: dict = Depends(verify_token)):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    try:
+        res = supabase.table("documents").select("*").eq("id", document_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        doc = res.data[0]
+    except Exception as e:
+        print(f"[ERROR] Supabase analysis error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
         
     s3_key = doc.get("s3_key")
     if not s3_key:
-        raise HTTPException(status_code=400, detail="Document analysis not available")
-        
-    # The extraction results are saved as .json in extracter/extracted_texts/
-    # From backend/main.py, the path is ../extracter/extracted_texts/
+        raise HTTPException(status_code=400, detail="Analysis not available")
+    
     json_filename = str(Path(s3_key).with_suffix('.json'))
     analysis_path = Path(__file__).parent.parent / "extracter" / "extracted_texts" / json_filename
     
     if not analysis_path.exists():
-        # Maybe it's still being processed or failed
-        print(f"⚠️ Analysis file not found at: {analysis_path}")
         return {"document": doc, "clauses": [], "status": "processing"}
         
     try:
         with open(analysis_path, "r", encoding="utf-8") as f:
-            clauses = json.load(f)
-        return {"document": doc, "clauses": clauses, "status": "complete"}
+            return {"document": doc, "clauses": json.load(f), "status": "complete"}
     except Exception as e:
-        print(f"❌ Error reading analysis file: {e}")
         raise HTTPException(status_code=500, detail=f"Error reading analysis: {str(e)}")
 
+
 @app.get("/api/documents/download/{document_id}")
-def download_document(
-    document_id: str,
-    current_user: dict = Depends(verify_token)
-):
-    documents = load_json(DOCUMENTS_FILE)
-    doc = next((d for d in documents if d["id"] == document_id), None)
-    
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
+def download_document(document_id: str, current_user: dict = Depends(verify_token)):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    try:
+        res = supabase.table("documents").select("s3_key").eq("id", document_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        s3_key = res.data[0]["s3_key"]
+    except Exception as e:
+        print(f"[ERROR] Supabase download fetch error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
         
-    s3_key = doc.get("s3_key")
     if not s3_key:
-        raise HTTPException(status_code=400, detail="Document not available on S3")
+        raise HTTPException(status_code=400, detail="File not on S3")
         
     try:
         url = s3_client.generate_presigned_url(
@@ -766,252 +705,179 @@ def download_document(
             ExpiresIn=3600
         )
         return {"download_url": url}
-    except ClientError as e:
+    except Exception as e:
         raise HTTPException(status_code=500, detail=f"S3 Error: {str(e)}")
 
+
 @app.post("/api/documents/share")
-def share_document(
-    share_request: DocumentShare,
-    current_user: dict = Depends(verify_token)
-):
-    documents = load_json(DOCUMENTS_FILE)
-    
-    # Find document
-    doc = next((d for d in documents if d["id"] == share_request.document_id), None)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-    
-    # Check permission
-    if current_user["role"] != "admin" and doc["user_id"] != current_user["user_id"]:
-        raise HTTPException(status_code=403, detail="Not authorized to share this document")
-    
-    # Update shared_with
-    if isinstance(doc["shared_with"], list):
-        if share_request.share_with not in doc["shared_with"]:
-            doc["shared_with"].append(share_request.share_with)
-    else:
-        doc["shared_with"] = [share_request.share_with]
-    
-    # Update document in list
-    for i, d in enumerate(documents):
-        if d["id"] == share_request.document_id:
-            documents[i] = doc
-            break
-    
-    save_json(DOCUMENTS_FILE, documents)
-    
-    # Send notification email
-    users = load_json(USERS_FILE)
-    recipient = next((u for u in users if u["id"] == share_request.share_with or u["role"] == share_request.share_with), None)
-    
-    if recipient:
-        email_body = f"""
-        <html>
-        <body style="font-family: Arial, sans-serif; padding: 20px;">
-            <h2>Document Shared with You</h2>
-            <p>A document has been shared with you on LACCIS.</p>
-            <p><strong>Document:</strong> {doc['filename']}</p>
-            <p><strong>Type:</strong> {doc['document_type']}</p>
-            <p><strong>Shared by:</strong> {current_user['email']}</p>
-            <p><a href="http://localhost:5173" style="background: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin-top: 10px;">View Document</a></p>
-        </body>
-        </html>
-        """
-        send_email(recipient["email"], "Document Shared - LACCIS", email_body)
-    
-    return {
-        "message": "Document shared successfully",
-        "document": doc
-    }
+def share_document(share_request: DocumentShare, current_user: dict = Depends(verify_token)):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    try:
+        # Fetch document
+        res = supabase.table("documents").select("*").eq("id", share_request.document_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        doc = res.data[0]
+        
+        # Update shared_with list
+        shared_with = doc.get("shared_with", [])
+        if not isinstance(shared_with, list): shared_with = []
+        if share_request.share_with not in shared_with:
+            shared_with.append(share_request.share_with)
+            supabase.table("documents").update({"shared_with": shared_with}).eq("id", share_request.document_id).execute()
+            doc["shared_with"] = shared_with
+
+        # Notify recipient
+        user_res = supabase.table("users").select("email").eq("id", share_request.share_with).execute()
+        if user_res.data:
+            recipient_email = user_res.data[0]["email"]
+            email_body = f"<html><body><h2>Document Shared</h2><p>{doc['filename']} shared by {current_user['email']}</p></body></html>"
+            send_email(recipient_email, "Document Shared - LACCIS", email_body)
+
+        return {"message": "Document shared successfully", "document": doc}
+    except Exception as e:
+        print(f"[ERROR] Supabase share error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/documents/approve/{document_id}")
-def approve_document(
-    document_id: str,
-    current_user: dict = Depends(verify_token)
-):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can approve documents")
-    
-    documents = load_json(DOCUMENTS_FILE)
-    
-    # Find and update document
-    for i, doc in enumerate(documents):
-        if doc["id"] == document_id:
-            documents[i]["status"] = "approved"
-            documents[i]["approved_at"] = datetime.now().isoformat()
-            documents[i]["approved_by"] = current_user["user_id"]
+def approve_document(document_id: str, current_user: dict = Depends(verify_token)):
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        # Fetch for activity log and email
+        res = supabase.table("documents").select("*").eq("id", document_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        doc = res.data[0]
+        
+        # Update
+        supabase.table("documents").update({
+            "status": "approved",
+            "approved_at": datetime.now().isoformat(),
+            "approved_by": current_user["user_id"]
+        }).eq("id", document_id).execute()
+        
+        record_activity(current_user["user_id"], doc["user_id"], "Approved document", f"Document: {doc['filename']}")
+        
+        # Notify
+        user_res = supabase.table("users").select("email").eq("id", doc["user_id"]).execute()
+        if user_res.data:
+            send_email(user_res.data[0]["email"], f"{doc['document_type']} Approved", f"<html><body><p>{doc['filename']} approved!</p></body></html>")
             
-            save_json(DOCUMENTS_FILE, documents)
-            
-            # Record activity
-            record_activity(
-                user_id=current_user["user_id"],
-                client_id=doc["user_id"],
-                action="Approved document",
-                details=f"Document: {doc['filename']}"
-            )
-            
-            # Notify client
-            users = load_json(USERS_FILE)
-            client = next((u for u in users if u["id"] == doc["user_id"]), None)
-            
-            if client:
-                email_body = f"""
-                <html>
-                <body style="font-family: Arial, sans-serif; padding: 20px;">
-                    <h2 style="color: #10b981;">Document Approved</h2>
-                    <p>Your {doc['document_type']} has been approved!</p>
-                    <p><strong>Document:</strong> {doc['filename']}</p>
-                    <p>You can now upload other documents.</p>
-                    <p><a href="http://localhost:5173" style="background: #6366f1; color: white; padding: 12px 24px; text-decoration: none; border-radius: 6px; display: inline-block; margin-top: 10px;">Go to LACCIS</a></p>
-                </body>
-                </html>
-                """
-                result = send_email(client["email"], f"{doc['document_type']} Approved - LACCIS", email_body)
-                print(f"Approval email result: {result}")
-            
-            return {
-                "message": "Document approved successfully",
-                "document": documents[i]
-            }
-    
-    raise HTTPException(status_code=404, detail="Document not found")
+        return {"message": "Document approved"}
+    except Exception as e:
+        print(f"[ERROR] Supabase approve error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/documents/reject/{document_id}")
-def reject_document(
-    document_id: str,
-    current_user: dict = Depends(verify_token)
-):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can reject documents")
-    
-    documents = load_json(DOCUMENTS_FILE)
-    
-    for i, doc in enumerate(documents):
-        if doc["id"] == document_id:
-            documents[i]["status"] = "rejected"
-            documents[i]["rejected_at"] = datetime.now().isoformat()
-            documents[i]["rejected_by"] = current_user["user_id"]
+def reject_document(document_id: str, current_user: dict = Depends(verify_token)):
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        res = supabase.table("documents").select("*").eq("id", document_id).execute()
+        if not res.data:
+            raise HTTPException(status_code=404, detail="Document not found")
+        doc = res.data[0]
+        
+        supabase.table("documents").update({
+            "status": "rejected",
+            "rejected_at": datetime.now().isoformat(),
+            "rejected_by": current_user["user_id"]
+        }).eq("id", document_id).execute()
+        
+        record_activity(current_user["user_id"], doc["user_id"], "Rejected document", f"Document: {doc['filename']}")
+        
+        user_res = supabase.table("users").select("email").eq("id", doc["user_id"]).execute()
+        if user_res.data:
+            send_email(user_res.data[0]["email"], f"{doc['document_type']} Update", f"<html><body><p>{doc['filename']} rejected.</p></body></html>")
             
-            save_json(DOCUMENTS_FILE, documents)
-            
-            # Record activity
-            record_activity(
-                user_id=current_user["user_id"],
-                client_id=doc["user_id"],
-                action="Rejected document",
-                details=f"Document: {doc['filename']}"
-            )
-            
-            # Notify client
-            users = load_json(USERS_FILE)
-            client = next((u for u in users if u["id"] == doc["user_id"]), None)
-            
-            if client:
-                email_body = f"""
-                <html>
-                <body style="font-family: Arial, sans-serif; padding: 20px;">
-                    <h2 style="color: #ef4444;">Document Rejected</h2>
-                    <p>Your {doc['document_type']} was not approved.</p>
-                    <p><strong>Document:</strong> {doc['filename']}</p>
-                    <p>Please check the requirements and upload again if necessary.</p>
-                </body>
-                </html>
-                """
-                send_email(client["email"], f"{doc['document_type']} Update - LACCIS", email_body)
-            
-            return {
-                "message": "Document rejected successfully",
-                "document": documents[i]
-            }
-    
-    raise HTTPException(status_code=404, detail="Document not found")
+        return {"message": "Document rejected"}
+    except Exception as e:
+        print(f"[ERROR] Supabase reject error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/documents/list")
 def list_documents(current_user: dict = Depends(verify_token)):
-    documents = load_json(DOCUMENTS_FILE)
-    
-    # Filter documents based on role
-    if current_user["role"] == "client":
-        # Show own documents and documents shared with this client
-        documents = [
-            d for d in documents 
-            if d["user_id"] == current_user["user_id"] 
-            or current_user["user_id"] in d.get("shared_with", [])
-            or "admin" in d.get("shared_with", [])
-        ]
-    else:
-        # Admin sees all documents or documents shared with admin
-        pass
-    
-    return {"documents": documents}
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        query = supabase.table("documents").select("*")
+        if current_user["role"] == "client":
+            res = query.or_(f"user_id.eq.{current_user['user_id']},shared_with.cs.[\"{current_user['user_id']}\"],shared_with.cs.[\"admin\"]").execute()
+        else:
+            res = query.execute()
+        return {"documents": res.data}
+    except Exception as e:
+        print(f"[ERROR] Supabase document list error: {e}")
+        return {"documents": []}
+
+
 
 @app.get("/api/documents/stats")
 def document_stats(current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
-        raise HTTPException(status_code=403, detail="Only admins can view stats")
-    
-    documents = load_json(DOCUMENTS_FILE)
-    
-    return {
-        "total_documents": len(documents),
-        "total_size": sum(d["size"] for d in documents)
-    }
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        res = supabase.table("documents").select("size", count="exact").execute()
+        total_docs = res.count
+        total_size = sum(d["size"] for d in res.data) if res.data else 0
+        return {"total_documents": total_docs, "total_size": total_size}
+    except Exception as e:
+        print(f"[ERROR] Supabase stats error: {e}")
+        return {"total_documents": 0, "total_size": 0}
+
 
 @app.post("/api/messages/send")
 def send_message(msg: MessageSend, current_user: dict = Depends(verify_token)):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    new_message = {
+        "id": f"msg-{uuid.uuid4().hex[:8]}",
+        "sender_id": current_user["user_id"],
+        "recipient_id": msg.recipient_id,
+        "content": msg.content,
+        "timestamp": datetime.now().isoformat()
+    }
     try:
-        messages = load_json(MESSAGES_FILE)
-        
-        # Log IDs for debugging
-        print(f"📩 Sending message: from {current_user['user_id']} to {msg.recipient_id}")
-        
-        new_message = {
-            "id": f"msg-{len(messages) + 1}-{secrets.token_hex(4)}",
-            "sender_id": current_user["user_id"],
-            "recipient_id": msg.recipient_id,
-            "content": msg.content,
-            "timestamp": datetime.now().isoformat()
-        }
-        
-        messages.append(new_message)
-        save_json(MESSAGES_FILE, messages)
-        print(f"✅ Message saved to {MESSAGES_FILE}")
-        
+        supabase.table("messages").insert(new_message).execute()
         return {"message": "Message sent", "data": new_message}
     except Exception as e:
-        print(f"❌ Error in send_message: {str(e)}")
+        print(f"[ERROR] Supabase message send error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/messages/list/{other_user_id}")
 def list_messages(other_user_id: str, current_user: dict = Depends(verify_token)):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    user_id = current_user.get("user_id")
     try:
-        user_id = current_user.get("user_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Invalid token: missing user_id")
-
-        print(f"🔍 Chat Request: {user_id} <-> {other_user_id}")
-        messages = load_json(MESSAGES_FILE)
-        
-        # Strictly 1-on-1 private filtering
-        filtered = [
-            m for m in messages
-            if (m.get("sender_id") == user_id and m.get("recipient_id") == other_user_id)
-            or (m.get("sender_id") == other_user_id and m.get("recipient_id") == user_id)
-        ]
-        
-        return {"messages": filtered}
+        res = supabase.table("messages")\
+            .select("*")\
+            .or_(f"and(sender_id.eq.{user_id},recipient_id.eq.{other_user_id}),and(sender_id.eq.{other_user_id},recipient_id.eq.{user_id})")\
+            .order("timestamp", desc=False).execute()
+        return {"messages": res.data}
     except Exception as e:
-        print(f"❌ Chat List Error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[ERROR] Supabase message list error: {e}")
+        return {"messages": []}
+
 
 
 @app.on_event("startup")
 def startup_event():
-    load_model()
-    print("✅ SBERT model loaded successfully")
+    # Deferring model loading to avoid blocking startup on limited CPU/Network
+    # load_model()
+    print("[INFO] Application startup complete - Model will be loaded on first use")
 @app.post("/api/contracts/share-with-client")
-
 async def share_contract_with_client(
     file: UploadFile = File(...),
     client_id: str = Form(""),
@@ -1019,85 +885,45 @@ async def share_contract_with_client(
     current_user: dict = Depends(verify_token)
 ):
     if current_user["role"] not in ["admin", "legal_team"]:
-        raise HTTPException(status_code=403, detail="Only admin or legal team can share contracts")
+        raise HTTPException(status_code=403, detail="Only legal team can share contracts")
 
-    # Validate file type
-    allowed_extensions = [".pdf", ".docx"]
-    file_ext = Path(file.filename).suffix.lower()
-    if file_ext not in allowed_extensions:
-        raise HTTPException(status_code=400, detail="Only PDF and DOCX files are allowed")
-
-    # Read file content
     content = await file.read()
-
-    # Validate file size (10MB max)
-    if len(content) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="File size must be under 10MB")
-
-    # Save file locally
     file_name = f"shared_{current_user['user_id']}_{uuid.uuid4().hex[:6]}_{file.filename}"
     file_path = UPLOADS_DIR / file_name
     with open(file_path, "wb") as f:
         f.write(content)
 
-    # Try to upload to S3
-    s3_url = None
+    s3_key, s3_url = None, None
     try:
-        if AWS_ACCESS_KEY and AWS_SECRET_KEY and BUCKET_NAME:
-            loop = asyncio.get_event_loop()
-            await asyncio.wait_for(
-                loop.run_in_executor(
-                    None,
-                    lambda: s3_client.put_object(
-                        Bucket=BUCKET_NAME,
-                        Key=file_name,
-                        Body=content
-                    )
-                ),
-                timeout=30
-            )
-            s3_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
-            print(f"✅ Shared contract uploaded to S3: {file_name}")
+        s3_client.put_object(Bucket=BUCKET_NAME, Key=file_name, Body=content)
+        s3_key, s3_url = file_name, f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
     except Exception as e:
-        print(f"⚠️ S3 upload failed for shared contract: {e}")
+        print(f"S3 shared upload error: {e}")
 
-    # Verify client exists
-    clients = load_json(CLIENTS_FILE)
-    client = next((c for c in clients if c["id"] == client_id), None)
-    if not client:
-        raise HTTPException(status_code=404, detail="Client not found")
-
-    # Save shared contract record
-    shared_contracts = load_json(SHARED_CONTRACTS_FILE)
     contract_id = f"sc-{uuid.uuid4().hex[:8]}"
     new_contract = {
         "id": contract_id,
         "filename": file.filename,
-        "document_type": file_ext.lstrip(".").upper(),
-        "client_id": client_id,
         "shared_by": current_user["user_id"],
-        "shared_by_email": current_user["email"],
-        "message": message or "",
-        "size": len(content),
+        "client_id": client_id,
+        "message": message,
         "status": "pending_review",
         "shared_at": datetime.now().isoformat(),
-        "file_path": str(file_path),
-        "s3_key": file_name if s3_url else None,
-        "s3_url": s3_url
+        "s3_key": s3_key,
+        "s3_url": s3_url,
+        "file_path": str(file_path)
     }
-    shared_contracts.append(new_contract)
-    save_json(SHARED_CONTRACTS_FILE, shared_contracts)
 
-    # Record activity
-    record_activity(
-        user_id=current_user["user_id"],
-        client_id=client_id,
-        action="Shared contract",
-        details=f"Contract: {file.filename}"
-    )
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        supabase.table("shared_contracts").insert(new_contract).execute()
+        record_activity(current_user["user_id"], client_id, "Shared contract", file.filename)
+        return {"message": "Contract shared", "contract": new_contract}
+    except Exception as e:
+        print(f"[ERROR] Supabase share contract error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    print(f"✅ Contract {file.filename} shared with client {client_id}")
-    return {"message": "Contract shared successfully", "contract": new_contract}
 
 
     raise HTTPException(status_code=404, detail="Contract not found")
@@ -1105,60 +931,53 @@ async def share_contract_with_client(
 
 @app.get("/api/contracts/from-legal")
 def get_contracts_from_legal(current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "client":
-        raise HTTPException(status_code=403, detail="Only clients can access this endpoint")
-
-    shared_contracts = load_json(SHARED_CONTRACTS_FILE)
-    client_contracts = [
-        c for c in shared_contracts
-        if c.get("client_id") == current_user["user_id"]
-    ]
-    return {"contracts": client_contracts}
-
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        res = supabase.table("shared_contracts").select("*").eq("client_id", current_user["user_id"]).execute()
+        return {"contracts": res.data}
+    except Exception as e:
+        print(f"[ERROR] Supabase get contracts error: {e}")
+        return {"contracts": []}
 
 @app.post("/api/contracts/accept/{contract_id}")
-def accept_shared_contract(
-    contract_id: str,
-    current_user: dict = Depends(verify_token)
-):
-    if current_user["role"] != "client":
-        raise HTTPException(status_code=403, detail="Only clients can accept contracts")
+def accept_shared_contract(contract_id: str, current_user: dict = Depends(verify_token)):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        # Update and fetch for activity log
+        res = supabase.table("shared_contracts").update({
+            "status": "accepted", 
+            "accepted_at": datetime.now().isoformat()
+        }).eq("id", contract_id).eq("client_id", current_user["user_id"]).execute()
+        
+        if res.data:
+            record_activity(current_user["user_id"], current_user["user_id"], "Accepted contract", res.data[0]["filename"])
+            return {"message": "Accepted", "contract": res.data[0]}
+        raise HTTPException(status_code=404, detail="Contract not found")
+    except HTTPException: raise
+    except Exception as e:
+        print(f"[ERROR] Supabase accept error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-    shared_contracts = load_json(SHARED_CONTRACTS_FILE)
-    for i, c in enumerate(shared_contracts):
-        if c["id"] == contract_id and c["client_id"] == current_user["user_id"]:
-            shared_contracts[i]["status"] = "accepted"
-            shared_contracts[i]["accepted_at"] = datetime.now().isoformat()
-            save_json(SHARED_CONTRACTS_FILE, shared_contracts)
-            
-            # Record activity
-            record_activity(
-                user_id=current_user["user_id"],
-                client_id=current_user["user_id"],
-                action="Accepted contract",
-                details=f"Contract: {c['filename']}"
-            )
-            
-            return {"message": "Contract accepted", "contract": shared_contracts[i]}
-
-    raise HTTPException(status_code=404, detail="Contract not found")
 
 
 @app.get("/api/activity/list")
-def list_activities(
-    client_id: Optional[str] = None,
-    current_user: dict = Depends(verify_token)
-):
-    activities = load_json(ACTIVITY_LOG_FILE)
-    
-    if current_user["role"] == "client":
-        # Clients only see their own activity
-        activities = [a for a in activities if a["client_id"] == current_user["user_id"]]
-    elif client_id:
-        # Admins can filter by client
-        activities = [a for a in activities if a["client_id"] == client_id]
-    
-    return {"activities": activities[:100]}  # Limit to 100 recent items
+def list_activities(client_id: Optional[str] = None, current_user: dict = Depends(verify_token)):
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        query = supabase.table("activity_log").select("*")
+        if current_user["role"] == "client":
+            query = query.eq("client_id", current_user["user_id"])
+        elif client_id:
+            query = query.eq("client_id", client_id)
+        res = query.order("timestamp", desc=True).limit(100).execute()
+        return {"activities": res.data}
+    except Exception as e:
+        print(f"[ERROR] Supabase activity list error: {e}")
+        return {"activities": []}
+
 
 
 @app.get("/api/contracts/download/{contract_id}")
@@ -1202,80 +1021,51 @@ def download_shared_contract(
 
 
 @app.post("/api/templates/upload")
-async def upload_template(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    template_type: str = Form(...), # NDA, RA, SOW, MSA
-    current_user: dict = Depends(verify_token)
-):
+async def upload_template(background_tasks: BackgroundTasks, file: UploadFile = File(...), template_type: str = Form(...), current_user: dict = Depends(verify_token)):
     if current_user["role"] not in ["admin", "legal_team"]:
-        raise HTTPException(status_code=403, detail="Only legal team can upload templates")
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Database not connected")
 
-    # Save locally
-    file_name = f"legal_template_{template_type}_{uuid.uuid4().hex[:8]}_{file.filename}"
-    file_path = UPLOADS_DIR / file_name
-    
     content = await file.read()
-    with open(file_path, "wb") as f:
-        f.write(content)
-
-    # Upload to S3
-    s3_url = None
+    file_name = f"template_{uuid.uuid4().hex[:8]}_{file.filename}"
+    file_path = UPLOADS_DIR / file_name
+    with open(file_path, "wb") as f: f.write(content)
+    
     try:
-        print(f"☁️ Uploading template {file_name} to S3...")
-        # Use loop.run_in_executor for blocking s3 call
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: s3_client.put_object(
-                Bucket=BUCKET_NAME,
-                Key=file_name,
-                Body=content
-            )
-        )
+        s3_client.put_object(Bucket=BUCKET_NAME, Key=file_name, Body=content)
         s3_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
-        print(f"✅ Template uploaded to S3")
-    except Exception as e:
-        print(f"❌ Template S3 Upload Error: {e}")
-
-    # Update templates.json
-    templates = load_json(TEMPLATES_FILE)
+    except Exception: s3_url = None
     
     new_template = {
         "id": f"tmpl-{uuid.uuid4().hex[:8]}",
         "filename": file.filename,
-        "template_type": template_type,
+        "document_type": "template", "template_type": template_type,
         "uploaded_by": current_user["user_id"],
         "uploaded_at": datetime.now().isoformat(),
-        "s3_url": s3_url,
-        "s3_key": file_name,
-        "file_path": str(file_path)
+        "s3_url": s3_url, "s3_key": file_name, "file_path": str(file_path)
     }
     
-    # We keep all versions, frontend can pick the latest
-    templates.append(new_template)
-    save_json(TEMPLATES_FILE, templates)
-    
-    # Trigger automated extraction for templates
-    if s3_url:
-        background_tasks.add_task(trigger_extraction, file_name)
-        print(f"⚡ Queued background extraction for template {file_name}")
-    
-    # Record activity
-    record_activity(
-        user_id=current_user["user_id"],
-        client_id="admin", 
-        action="Uploaded Template",
-        details=f"Type: {template_type}, File: {file.filename}"
-    )
-    
-    return {"message": "Template uploaded successfully", "template": new_template}
+    try:
+        supabase.table("documents").insert(new_template).execute()
+        background_tasks.add_task(trigger_extraction, file_name, template_type, "legal")
+        return {"message": "Template uploaded", "template": new_template}
+    except Exception as e:
+        print(f"[ERROR] Supabase template upload error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save template metadata")
 
 
 @app.get("/api/templates/list")
 def list_templates(current_user: dict = Depends(verify_token)):
-    templates = load_json(TEMPLATES_FILE)
-    return {"templates": templates}
+    if not supabase:
+        raise HTTPException(status_code=500, detail="Supabase not connected")
+    try:
+        res = supabase.table("documents").select("*").eq("document_type", "template").execute()
+        return {"templates": res.data}
+    except Exception as e:
+        print(f"[ERROR] Supabase template list error: {e}")
+        return {"templates": []}
+
 
 
 if __name__ == "__main__":

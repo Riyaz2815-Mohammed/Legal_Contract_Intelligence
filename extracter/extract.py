@@ -25,7 +25,7 @@ s3_client = boto3.client(
     region_name=AWS_REGION
 )
 
-UPLOAD_FOLDER = "uploads"
+UPLOAD_FOLDER = "backend/data/uploads"
 TEXT_FOLDER = "extracted_texts"
 
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
@@ -105,8 +105,17 @@ def index():
 
 @app.route("/extract_s3/<path:file_key>")
 def extract_s3(file_key):
-    """Pull a file from S3, extract text, classify clauses, return JSON results."""
+    """Pull a file from S3, extract text, classify clauses, return JSON results.
+
+    Optional query params:
+        document_type  — e.g. NDA, MSA, SOW  (default: "Unknown")
+        source         — "client" or "legal"  (default: "unknown")
+    """
     local_path = os.path.join(app.config["UPLOAD_FOLDER"], file_key)
+
+    # Read optional metadata from query string
+    document_type = request.args.get("document_type", "Unknown")
+    source        = request.args.get("source", "unknown")
 
     try:
         print(f"☁️ Downloading {file_key} from S3...")
@@ -128,13 +137,17 @@ def extract_s3(file_key):
 
         print(f"📝 Saved extracted text to {txt_path}")
 
-        # Parse and classify
+        # Parse and classify — pass document type and source
         from clause_engine import parse_text_file, process_document
         raw_blocks = parse_text_file(txt_path)
-        classification_results = process_document(raw_blocks)
+        classification_results = process_document(
+            raw_blocks,
+            document=document_type,
+            source=source
+        )
 
         with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(classification_results, f, indent=2)
+            json.dump(classification_results, f, indent=2, ensure_ascii=False)
 
         print(f"✅ Classification complete: {len(classification_results)} clauses → {json_path}")
 
