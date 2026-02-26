@@ -1,9 +1,13 @@
+import { useNavigate } from 'react-router-dom';
 import './DocumentsTable.css';
 
 const API_URL = 'http://localhost:8000';
 
 function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, currentUser, hideActions = false }) {
+    const navigate = useNavigate();
+
     const formatFileSize = (bytes) => {
+        if (!bytes || isNaN(bytes)) return 'Unknown Size';
         if (bytes === 0) return '0 Bytes';
         const k = 1024;
         const sizes = ['Bytes', 'KB', 'MB', 'GB'];
@@ -155,8 +159,8 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, c
                                         {doc.document_type !== 'Redlined' && (
                                             <button
                                                 className="btn-action btn-review"
-                                                onClick={() => window.location.href = `/review/${doc.id}`}
-                                                title="Review AI Analysis & Risk"
+                                                onClick={() => navigate(`/analysis/${doc.id}`)}
+                                                title="View AI Analysis"
                                             >
                                                 Review
                                             </button>
