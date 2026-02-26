@@ -11,6 +11,7 @@ const API_URL = 'http://localhost:8000';
 function Dashboard({ user, onLogout }) {
     const navigate = useNavigate();
 
+    // Only actual clients see the client dashboard — admins and legal team see the full dashboard
     if (user.role === 'client') {
         return <ClientDashboard user={user} onLogout={onLogout} />;
     }

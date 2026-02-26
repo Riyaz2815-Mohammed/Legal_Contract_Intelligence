@@ -10,7 +10,7 @@ function Navbar({ user, onLogout, title = "LACCIS Dashboard" }) {
         <nav className="navbar">
             <div className="navbar-left">
                 <h2>{title}</h2>
-                {user?.role === 'admin' && (
+                {(user?.role === 'admin' || user?.role === 'legal_team') && (
                     <div className="nav-links">
                         <Link to="/dashboard" className="nav-link">Clients</Link>
                         <Link to="/legal-team" className="nav-link">Legal Team</Link>

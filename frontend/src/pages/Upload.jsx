@@ -31,8 +31,10 @@ function Upload({ user, onLogout }) {
         }
     };
 
+    const isLegal = user.role === 'admin' || user.role === 'legal_team';
+
     const loadClients = async () => {
-        if (user.role === 'admin') {
+        if (isLegal) {
             try {
                 const token = localStorage.getItem('token');
                 const response = await fetch(`${API_URL}/api/clients/list`, {
@@ -103,8 +105,8 @@ function Upload({ user, onLogout }) {
             <div className="dashboard-content-v2">
                 <div className="section-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                        <h2>{user.role === 'admin' ? 'Document Management' : 'Document Upload'}</h2>
-                        <p>{user.role === 'admin'
+                        <h2>{isLegal ? 'Document Management' : 'Document Upload'}</h2>
+                        <p>{isLegal
                             ? 'Manage all legal records and share them with clients.'
                             : 'Upload and track your contract documents.'}</p>
                     </div>
@@ -121,7 +123,7 @@ function Upload({ user, onLogout }) {
                 </div>
 
                 <div className="section-header" style={{ marginTop: '2.5rem' }}>
-                    <h3>{user.role === 'admin' ? 'Repository' : 'Your History'}</h3>
+                    <h3>{isLegal ? 'Repository' : 'Your History'}</h3>
                 </div>
 
                 <div className="table-wrapper">
@@ -152,7 +154,7 @@ function Upload({ user, onLogout }) {
                 <p style={{ color: '#64748b', marginBottom: '1.5rem', fontSize: '0.875rem' }}>
                     Send "{shareModal.document?.filename}" to:
                 </p>
-                {user.role === 'admin' && (
+                {isLegal && (
                     <div className="form-group">
                         <label style={{ display: 'block', marginBottom: '0.5rem', color: '#64748b', fontSize: '0.8125rem', fontWeight: '600' }}>
                             Target Client
