@@ -18,7 +18,8 @@ from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
-from supabase import create_client, Client, ClientOptions
+import psycopg2
+from psycopg2 import pool
 from embeddings.sbert_model import load_model
 
 app = FastAPI(title="LACCIS API", description="Legal Clause Classification Intelligence System")
@@ -57,29 +58,21 @@ AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
 AWS_REGION = os.getenv("REGION")
 BUCKET_NAME = os.getenv("BUCKET_NAME")
 
-# Supabase Configuration
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# Database Configuration
+DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Initialize Supabase Client
-supabase: Client = None
-if SUPABASE_URL and SUPABASE_KEY:
+# Initialize PostgreSQL Connection Pool
+db_pool = None
+if DATABASE_URL:
     try:
-        # Initialize with a timeout if possible (using httpx options)
-        from httpx import Timeout
-        supabase = create_client(
-            SUPABASE_URL, 
-            SUPABASE_KEY,
-            options=ClientOptions(
-                postgrest_client_timeout=Timeout(10.0),
-                storage_client_timeout=Timeout(10.0)
-            )
+        db_pool = psycopg2.pool.ThreadedConnectionPool(
+            1, 20, DATABASE_URL
         )
-        print("[SUPABASE] Supabase client initialized")
+        print("[DATABASE] PostgreSQL Connection Pool initialized")
     except Exception as e:
-        print(f"[ERROR] Supabase initialization failed: {e}")
+        print(f"[ERROR] Database pool initialization failed: {e}")
 else:
-    print("[SUPABASE] Supabase credentials missing")
+    print("[DATABASE] DATABASE_URL missing")
 
 # Initialize S3 Client with timeouts to prevent infinite hang
 s3_client = boto3.client(
@@ -142,19 +135,24 @@ class Message(BaseModel):
 
 # Helper functions
 def record_activity(user_id: str, client_id: str, action: str, details: str = ""):
-
-    if supabase:
+    if db_pool:
+        conn = None
         try:
-            supabase.table("activity_log").insert({
-                "id": f"act-{uuid.uuid4().hex[:8]}",
-                "user_id": user_id,
-                "client_id": client_id,
-                "action": action,
-                "details": details,
-                "timestamp": datetime.now().isoformat()
-            }).execute()
+            conn = db_pool.getconn()
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO activity_log (id, user_id, client_id, action, details, timestamp)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    (f"act-{uuid.uuid4().hex[:8]}", user_id, client_id, action, details, datetime.now())
+                )
+            conn.commit()
         except Exception as e:
-            print(f"[ERROR] Supabase record_activity error: {e}")
+            print(f"[ERROR] record_activity error: {e}")
+            if conn: conn.rollback()
+        finally:
+            if conn: db_pool.putconn(conn)
 
 
 def create_token(user_id: str, email: str, role: str):
@@ -170,6 +168,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
     try:
         token = credentials.credentials
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        print(f"[AUTH] Token verified: {payload.get('email')} | role: {payload.get('role')}")
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
@@ -261,90 +260,103 @@ def root():
 
 @app.post("/api/auth/login")
 def login(request: LoginRequest):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
     
+    conn = None
     try:
-        response = supabase.table("users").select("*").eq("email", request.email).execute()
-        if not response.data:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, email, name, role, password_hash FROM users WHERE email = %s", (request.email,))
+            user_row = cur.fetchone()
+            
+        if not user_row:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         
-        user = response.data[0]
-        # Direct password comparison (plaintext as currently used)
-        if user.get("password") == request.password or user.get("password_hash") == request.password:
-            token = create_token(user["id"], user["email"], user["role"])
-            record_activity(user["id"], user["id"], "Logged in")
+        user_id, email, name, role, password_hash = user_row
+        
+        # Direct password comparison
+        if password_hash == request.password:
+            token = create_token(user_id, email, role)
+            record_activity(user_id, user_id, "Logged in")
             return {
                 "token": token,
                 "user": {
-                    "id": user["id"],
-                    "name": user["name"],
-                    "email": user["email"],
-                    "role": user["role"]
+                    "id": user_id,
+                    "name": name,
+                    "email": email,
+                    "role": role
                 }
             }
         raise HTTPException(status_code=401, detail="Invalid credentials")
+    except HTTPException: raise
     except Exception as e:
         print(f"[ERROR] Login error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Database error during login")
+    finally:
+        if conn: db_pool.putconn(conn)
+
 
 
 @app.post("/api/clients/create")
 def create_client(client: ClientCreate, current_user: dict = Depends(verify_token)):
     if current_user["role"] not in ("admin", "legal_team"):
         raise HTTPException(status_code=403, detail="Only admins and legal team members can create clients")
-    
-    client_id = f"client-{uuid.uuid4().hex[:8]}"
-    random_suffix = secrets.token_hex(3).upper()
-    password = f"LACCIS-{random_suffix}"
-    
-    # Create client user
-    users = load_json(USERS_FILE)
-    if any(u["email"] == client.email for u in users):
-        raise HTTPException(status_code=400, detail="Email already exists")
-    
-    created_at = datetime.now().isoformat()
-    new_user = {
-        "id": client_id,
-        "name": client.name,
-        "email": client.email,
-        "password": password,
-        "role": "client",
-        "created_at": created_at
-    }
-    
-    # Supabase Integration
-    if supabase:
-        try:
-            supabase.table("users").insert(new_user).execute()
-        except Exception as e:
-            print(f"Supabase client create error: {e}")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
 
-    users.append(new_user)
-    save_json(USERS_FILE, users)
-    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # Check existence
+            cur.execute("SELECT 1 FROM users WHERE email = %s", (client.email,))
+            if cur.fetchone():
+                raise HTTPException(status_code=400, detail="Email already exists")
+
+            client_id = f"client-{uuid.uuid4().hex[:8]}"
+            random_suffix = secrets.token_hex(3).upper()
+            password = f"LACCIS-{random_suffix}"
+            created_at = datetime.now()
+            
+            cur.execute(
+                """
+                INSERT INTO users (id, name, email, password_hash, role, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (client_id, client.name, client.email, password, "client", created_at)
+            )
+        conn.commit()
+    except HTTPException: raise
+    except Exception as e:
+        print(f"[ERROR] create_client database error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    finally:
+        if conn: db_pool.putconn(conn)
+
     # Load and customize email template
     try:
         template_path = Path("email_template.html")
-        with open(template_path, 'r', encoding='utf-8') as f:
-            email_body = f.read()
-        
-        # Replace placeholders
-        email_body = email_body.replace('{CLIENT_NAME}', client.name)
-        email_body = email_body.replace('{CLIENT_EMAIL}', client.email)
-        email_body = email_body.replace('{CLIENT_PASSWORD}', password)
+        if template_path.exists():
+            with open(template_path, 'r', encoding='utf-8') as f:
+                email_body = f.read()
+            email_body = email_body.replace('{CLIENT_NAME}', client.name)
+            email_body = email_body.replace('{CLIENT_EMAIL}', client.email)
+            email_body = email_body.replace('{CLIENT_PASSWORD}', password)
+        else:
+            email_body = f"<html><body><h2>Welcome {client.name}</h2><p>Password: {password}</p></body></html>"
     except Exception as e:
         print(f"Error loading template: {e}")
-        # Fallback to basic email
         email_body = f"<html><body><h2>Welcome {client.name}</h2><p>Password: {password}</p></body></html>"
     
-    email_sent = send_email(client.email, "Your LACCIS Login Credentials", email_body)
+    email_res = send_email(client.email, "Your LACCIS Login Credentials", email_body)
     
     return {
         "message": "Client created successfully",
-        "client": {"id": client_id, "name": client.name, "email": client.email, "created_at": created_at},
-        "email_sent": email_sent['success'],
-        "email_message": email_sent['message'],
+        "client": {"id": client_id, "name": client.name, "email": client.email, "created_at": created_at.isoformat()},
+        "email_sent": email_res.get('success', False),
+        "email_message": email_res.get('message', ""),
         "credentials": {
             "email": client.email,
             "password": password
@@ -352,143 +364,168 @@ def create_client(client: ClientCreate, current_user: dict = Depends(verify_toke
     }
 
 
+
+
 @app.post("/api/legal/create")
 def create_legal_team_member(member: LegalTeamMemberCreate, current_user: dict = Depends(verify_token)):
     if current_user["role"] not in ("admin", "legal_team"):
         raise HTTPException(status_code=403, detail="Only admins and legal team members can create legal team members")
-    
-    member_id = f"legal-{uuid.uuid4().hex[:8]}"
-    password = secrets.token_urlsafe(12)
-    
-    users = load_json(USERS_FILE)
-    if any(u["email"] == member.email for u in users):
-        raise HTTPException(status_code=400, detail="Email already exists")
-    
-    created_at = datetime.now().isoformat()
-    new_user = {
-        "id": member_id,
-        "name": member.name,
-        "email": member.email,
-        "password": password,
-        "role": "legal_team",
-        "created_at": created_at
-    }
-    
-    # Supabase Integration
-    if supabase:
-        try:
-            supabase.table("users").insert(new_user).execute()
-        except Exception as e:
-            print(f"Supabase legal team member create error: {e}")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
 
-    users.append(new_user)
-    save_json(USERS_FILE, users)
-    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM users WHERE email = %s", (member.email,))
+            if cur.fetchone():
+                raise HTTPException(status_code=400, detail="Email already exists")
+
+            member_id = f"legal-{uuid.uuid4().hex[:8]}"
+            password = secrets.token_urlsafe(12)
+            created_at = datetime.now()
+            
+            cur.execute(
+                """
+                INSERT INTO users (id, name, email, password_hash, role, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                """,
+                (member_id, member.name, member.email, password, "legal_team", created_at)
+            )
+        conn.commit()
+    except HTTPException: raise
+    except Exception as e:
+        print(f"[ERROR] create_legal_team_member database error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    finally:
+        if conn: db_pool.putconn(conn)
+
     # Send email with credentials
     email_body = f"<html><body><h2>Welcome {member.name}</h2><p>Password: {password}</p></body></html>"
-    email_sent = send_email(member.email, "LACCIS Legal Team Account", email_body)
+    email_res = send_email(member.email, "LACCIS Legal Team Account", email_body)
     
     return {
         "message": "Legal team member created successfully",
-        "member": {"id": member_id, "name": member.name, "email": member.email, "created_at": created_at},
-        "email_sent": email_sent,
+        "member": {"id": member_id, "name": member.name, "email": member.email, "created_at": created_at.isoformat()},
+        "email_sent": email_res.get('success', False),
         "credentials": {
             "email": member.email,
             "password": password
         }
     }
 
+
+
 @app.get("/api/legal/list")
 def list_legal_team(current_user: dict = Depends(verify_token)):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    if current_user["role"] != "admin":
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
     try:
-        response = supabase.table("users").select("id, name, email, created_at").eq("role", "legal_team").execute()
-        return {"members": response.data}
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name, email, created_at FROM users WHERE role = 'legal_team'")
+            rows = cur.fetchall()
+            members = [{"id": r[0], "name": r[1], "email": r[2], "created_at": r[3].isoformat() if r[3] else None} for r in rows]
+            return {"members": members}
     except Exception as e:
-        print(f"[ERROR] Supabase legal list error: {e}")
-        return {"members": []}
+        print(f"[ERROR] list_legal_team error: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 @app.delete("/api/legal/delete/{member_id}")
 def delete_legal_team_member(member_id: str, current_user: dict = Depends(verify_token)):
-    if current_user["role"] not in ("admin", "legal_team"):
+    if current_user["role"] != "admin":
         raise HTTPException(status_code=403, detail="Forbidden")
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
     try:
-        supabase.table("users").delete().eq("id", member_id).execute()
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM users WHERE id = %s AND role = 'legal_team'", (member_id,))
+        conn.commit()
         return {"message": "Legal team member deleted successfully"}
     except Exception as e:
-        print(f"[ERROR] Supabase legal delete error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[ERROR] delete_legal_team_member error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 @app.get("/api/clients/list")
 def list_clients(current_user: dict = Depends(verify_token)):
     if current_user["role"] not in ("admin", "legal_team"):
         raise HTTPException(status_code=403, detail="Forbidden")
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
     try:
-        response = supabase.table("users").select("id, name, email, created_at").eq("role", "client").execute()
-        return {"clients": response.data}
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name, email, created_at FROM users WHERE role = 'client'")
+            rows = cur.fetchall()
+            clients = [{"id": r[0], "name": r[1], "email": r[2], "created_at": r[3].isoformat() if r[3] else None} for r in rows]
+            return {"clients": clients}
     except Exception as e:
-        print(f"[ERROR] Supabase client list error: {e}")
-        return {"clients": []}
+        print(f"[ERROR] list_clients error: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
-@app.delete("/api/clients/delete/{client_id}")
-def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
-    if current_user["role"] not in ("admin", "legal_team"):
-        raise HTTPException(status_code=403, detail="Only admins and legal team members can delete clients")
-    
-    if supabase:
-        try:
-            supabase.table("users").delete().eq("id", client_id).execute()
-        except Exception as e:
-            print(f"Supabase client delete error: {e}")
 
-    users = load_json(USERS_FILE)
-    documents = load_json(DOCUMENTS_FILE)
-    
 @app.delete("/api/clients/delete/{client_id}")
 def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
     if current_user["role"] not in ("admin", "legal_team"):
         raise HTTPException(status_code=403, detail="Forbidden")
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
-
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
     try:
-        # 1. Fetch client docs for cleanup
-        res = supabase.table("documents").select("*").eq("user_id", client_id).execute()
-        docs = res.data if res.data else []
-        
-        # 2. Cleanup S3 and local files
-        for doc in docs:
-            # S3
-            s3_key = doc.get("s3_key")
-            if s3_key:
-                try: 
-                    s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
-                except Exception as e: 
-                    print(f"[ERROR] S3 cleanup error: {e}")
-            # Local
-            try:
-                fp = Path(doc.get("file_path", ""))
-                if fp.exists(): fp.unlink()
-            except Exception as e:
-                print(f"[ERROR] Local file cleanup error: {e}")
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # 1. Get all documents for this client to delete from S3
+            cur.execute("SELECT s3_key, file_path FROM documents WHERE user_id = %s", (client_id,))
+            docs = cur.fetchall()
+            
+            # 2. Cleanup S3 and local files
+            for s3_key, file_path in docs:
+                if s3_key:
+                    try:
+                        s3_client.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+                    except Exception as e:
+                        print(f"[ERROR] S3 cleanup error: {e}")
+                if file_path:
+                    try:
+                        fp = Path(file_path)
+                        if fp.exists(): fp.unlink()
+                    except Exception as e:
+                        print(f"[ERROR] Local file cleanup error: {e}")
 
-        # 3. Delete from Supabase (Cascade usually handles docs, but we can be explicit if needed)
-        # Note: If schema has cascade, we just delete user. If not, we delete docs first.
-        supabase.table("documents").delete().eq("user_id", client_id).execute()
-        supabase.table("users").delete().eq("id", client_id).execute()
-        
-        return {"message": "Client and associated documents deleted", "documents_cleaned": len(docs)}
+            # 3. DB cleanup - Cascade should handle it if set, but we do it explicitly
+            cur.execute("DELETE FROM document_history WHERE document_id IN (SELECT id FROM documents WHERE user_id = %s)", (client_id,))
+            cur.execute("DELETE FROM document_analysis WHERE document_id IN (SELECT id FROM documents WHERE user_id = %s)", (client_id,))
+            cur.execute("DELETE FROM documents WHERE user_id = %s", (client_id,))
+            cur.execute("DELETE FROM users WHERE id = %s", (client_id,))
+        conn.commit()
+        return {"message": "Client and associated documents deleted successfully"}
     except Exception as e:
-        print(f"[ERROR] Supabase client delete error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[ERROR] delete_client database error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 
@@ -624,14 +661,27 @@ async def upload_document(
         "s3_key": file_name
     }
     
-    if not supabase:
+    if not db_pool:
         raise HTTPException(status_code=500, detail="Database not connected")
         
+    conn = None
     try:
-        supabase.table("documents").insert(new_doc).execute()
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO documents (id, filename, document_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, file_path, s3_url, s3_key)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (new_doc["id"], new_doc["filename"], new_doc["document_type"], new_doc["user_id"], new_doc["user_email"], new_doc["user_role"], new_doc["size"], new_doc["status"], new_doc["shared_with"], new_doc["uploaded_at"], new_doc["file_path"], new_doc["s3_url"], new_doc["s3_key"])
+            )
+        conn.commit()
     except Exception as e:
-        print(f"[ERROR] Supabase document upload error: {e}")
+        print(f"[ERROR] Database document upload error: {e}")
+        if conn: conn.rollback()
         raise HTTPException(status_code=500, detail="Failed to save metadata")
+    finally:
+        if conn: db_pool.putconn(conn)
 
     # Record activity
     record_activity(
@@ -654,18 +704,23 @@ async def upload_document(
 
 @app.get("/api/documents/analysis/{document_id}")
 def get_document_analysis(document_id: str, current_user: dict = Depends(verify_token)):
-    if not supabase:
+    if not db_pool:
         raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
     try:
-        res = supabase.table("documents").select("*").eq("id", document_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Document not found")
-        doc = res.data[0]
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT s3_key FROM documents WHERE id = %s", (document_id,))
+            doc_s3_key = cur.fetchone()
+            if not doc_s3_key:
+                raise HTTPException(status_code=404, detail="Document not found")
+            s3_key = doc_s3_key[0]
     except Exception as e:
-        print(f"[ERROR] Supabase analysis error: {e}")
+        print(f"[ERROR] Database analysis error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
         
-    s3_key = doc.get("s3_key")
     if not s3_key:
         raise HTTPException(status_code=400, detail="Analysis not available")
     
@@ -673,27 +728,75 @@ def get_document_analysis(document_id: str, current_user: dict = Depends(verify_
     analysis_path = Path(__file__).parent.parent / "extracter" / "extracted_texts" / json_filename
     
     if not analysis_path.exists():
-        return {"document": doc, "clauses": [], "status": "processing"}
+        # Fetch full document details for the response if analysis is pending
+        conn = None
+        try:
+            conn = db_pool.getconn()
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, filename, document_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, file_path, s3_url, s3_key FROM documents WHERE id = %s", (document_id,))
+                row = cur.fetchone()
+                if row:
+                    doc = {
+                        "id": row[0], "filename": row[1], "document_type": row[2], "user_id": row[3],
+                        "user_email": row[4], "user_role": row[5], "size": row[6], "status": row[7],
+                        "shared_with": row[8], "uploaded_at": row[9].isoformat() if row[9] else None,
+                        "file_path": row[10], "s3_url": row[11], "s3_key": row[12]
+                    }
+                    return {"document": doc, "clauses": [], "status": "processing"}
+                else:
+                    raise HTTPException(status_code=404, detail="Document not found")
+        except Exception as e:
+            print(f"[ERROR] Database error fetching document for analysis status: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            if conn: db_pool.putconn(conn)
         
     try:
-        with open(analysis_path, "r", encoding="utf-8") as f:
-            return {"document": doc, "clauses": json.load(f), "status": "complete"}
+        # Fetch full document details for the response if analysis is complete
+        conn = None
+        try:
+            conn = db_pool.getconn()
+            with conn.cursor() as cur:
+                cur.execute("SELECT id, filename, document_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, file_path, s3_url, s3_key FROM documents WHERE id = %s", (document_id,))
+                row = cur.fetchone()
+                if row:
+                    doc = {
+                        "id": row[0], "filename": row[1], "document_type": row[2], "user_id": row[3],
+                        "user_email": row[4], "user_role": row[5], "size": row[6], "status": row[7],
+                        "shared_with": row[8], "uploaded_at": row[9].isoformat() if row[9] else None,
+                        "file_path": row[10], "s3_url": row[11], "s3_key": row[12]
+                    }
+                    with open(analysis_path, "r", encoding="utf-8") as f:
+                        return {"document": doc, "clauses": json.load(f), "status": "complete"}
+                else:
+                    raise HTTPException(status_code=404, detail="Document not found")
+        except Exception as e:
+            print(f"[ERROR] Database error fetching document for analysis result: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+        finally:
+            if conn: db_pool.putconn(conn)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading analysis: {str(e)}")
 
 
 @app.get("/api/documents/download/{document_id}")
 def download_document(document_id: str, current_user: dict = Depends(verify_token)):
-    if not supabase:
+    if not db_pool:
         raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
     try:
-        res = supabase.table("documents").select("s3_key").eq("id", document_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Document not found")
-        s3_key = res.data[0]["s3_key"]
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT s3_key FROM documents WHERE id = %s", (document_id,))
+            res = cur.fetchone()
+            if not res:
+                raise HTTPException(status_code=404, detail="Document not found")
+            s3_key = res[0]
     except Exception as e:
-        print(f"[ERROR] Supabase download fetch error: {e}")
+        print(f"[ERROR] Database download fetch error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
         
     if not s3_key:
         raise HTTPException(status_code=400, detail="File not on S3")
@@ -711,112 +814,134 @@ def download_document(document_id: str, current_user: dict = Depends(verify_toke
 
 @app.post("/api/documents/share")
 def share_document(share_request: DocumentShare, current_user: dict = Depends(verify_token)):
-    if not supabase:
+    if not db_pool:
         raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
     try:
-        # Fetch document
-        res = supabase.table("documents").select("*").eq("id", share_request.document_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Document not found")
-        doc = res.data[0]
-        
-        # Update shared_with list
-        shared_with = doc.get("shared_with", [])
-        if not isinstance(shared_with, list): shared_with = []
-        if share_request.share_with not in shared_with:
-            shared_with.append(share_request.share_with)
-            supabase.table("documents").update({"shared_with": shared_with}).eq("id", share_request.document_id).execute()
-            doc["shared_with"] = shared_with
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # Fetch document
+            cur.execute("SELECT id, filename, user_id, shared_with FROM documents WHERE id = %s", (share_request.document_id,))
+            doc_row = cur.fetchone()
+            if not doc_row:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            doc_id, filename, doc_user_id, shared_with_db = doc_row
+            
+            # Update shared_with list
+            shared_with = shared_with_db if isinstance(shared_with_db, list) else []
+            if share_request.share_with not in shared_with:
+                shared_with.append(share_request.share_with)
+                cur.execute("UPDATE documents SET shared_with = %s WHERE id = %s", (shared_with, share_request.document_id))
+                conn.commit()
+            
+            # Notify recipient
+            cur.execute("SELECT email FROM users WHERE id = %s", (share_request.share_with,))
+            user_res = cur.fetchone()
+            if user_res:
+                recipient_email = user_res[0]
+                email_body = f"<html><body><h2>Document Shared</h2><p>{filename} shared by {current_user['email']}</p></body></html>"
+                send_email(recipient_email, "Document Shared - LACCIS", email_body)
 
-        # Notify recipient
-        user_res = supabase.table("users").select("email").eq("id", share_request.share_with).execute()
-        if user_res.data:
-            recipient_email = user_res.data[0]["email"]
-            email_body = f"<html><body><h2>Document Shared</h2><p>{doc['filename']} shared by {current_user['email']}</p></body></html>"
-            send_email(recipient_email, "Document Shared - LACCIS", email_body)
-
-        return {"message": "Document shared successfully", "document": doc}
+            return {"message": "Document shared successfully", "document": {"id": doc_id, "filename": filename, "user_id": doc_user_id, "shared_with": shared_with}}
     except Exception as e:
-        print(f"[ERROR] Supabase share error: {e}")
+        print(f"[ERROR] Database share error: {e}")
+        if conn: conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 @app.post("/api/documents/approve/{document_id}")
 def approve_document(document_id: str, current_user: dict = Depends(verify_token)):
     if current_user["role"] not in ("admin", "legal_team"):
         raise HTTPException(status_code=403, detail="Forbidden")
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    if not db_pool: raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
     try:
-        # Fetch for activity log and email
-        res = supabase.table("documents").select("*").eq("id", document_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Document not found")
-        doc = res.data[0]
-        
-        # Update
-        supabase.table("documents").update({
-            "status": "approved",
-            "approved_at": datetime.now().isoformat(),
-            "approved_by": current_user["user_id"]
-        }).eq("id", document_id).execute()
-        
-        record_activity(current_user["user_id"], doc["user_id"], "Approved document", f"Document: {doc['filename']}")
-        
-        # Notify
-        user_res = supabase.table("users").select("email").eq("id", doc["user_id"]).execute()
-        if user_res.data:
-            send_email(user_res.data[0]["email"], f"{doc['document_type']} Approved", f"<html><body><p>{doc['filename']} approved!</p></body></html>")
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id, filename, document_type FROM documents WHERE id = %s", (document_id,))
+            doc = cur.fetchone()
+            if not doc: raise HTTPException(status_code=404, detail="Document not found")
             
+            doc_user_id, filename, document_type = doc
+            
+            cur.execute("UPDATE documents SET status = 'approved', approved_at = %s, approved_by = %s WHERE id = %s", (datetime.now(), current_user["user_id"], document_id))
+            
+            record_activity(current_user["user_id"], doc_user_id, "Approved document", f"Document: {filename}")
+            
+            cur.execute("SELECT email FROM users WHERE id = %s", (doc_user_id,))
+            user_res = cur.fetchone()
+            if user_res:
+                send_email(user_res[0], f"{document_type} Approved", f"<html><body><p>{filename} approved!</p></body></html>")
+        conn.commit()
         return {"message": "Document approved"}
+    except HTTPException: raise
     except Exception as e:
-        print(f"[ERROR] Supabase approve error: {e}")
+        print(f"[ERROR] Database approve error: {e}")
+        if conn: conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
 
 @app.post("/api/documents/reject/{document_id}")
 def reject_document(document_id: str, current_user: dict = Depends(verify_token)):
     if current_user["role"] not in ("admin", "legal_team"):
         raise HTTPException(status_code=403, detail="Forbidden")
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
     try:
-        res = supabase.table("documents").select("*").eq("id", document_id).execute()
-        if not res.data:
-            raise HTTPException(status_code=404, detail="Document not found")
-        doc = res.data[0]
-        
-        supabase.table("documents").update({
-            "status": "rejected",
-            "rejected_at": datetime.now().isoformat(),
-            "rejected_by": current_user["user_id"]
-        }).eq("id", document_id).execute()
-        
-        record_activity(current_user["user_id"], doc["user_id"], "Rejected document", f"Document: {doc['filename']}")
-        
-        user_res = supabase.table("users").select("email").eq("id", doc["user_id"]).execute()
-        if user_res.data:
-            send_email(user_res.data[0]["email"], f"{doc['document_type']} Update", f"<html><body><p>{doc['filename']} rejected.</p></body></html>")
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id, filename, document_type FROM documents WHERE id = %s", (document_id,))
+            doc = cur.fetchone()
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
             
+            user_id, filename, document_type = doc
+            
+            cur.execute(
+                "UPDATE documents SET status = 'rejected', rejected_at = %s, rejected_by = %s WHERE id = %s",
+                (datetime.now(), current_user["user_id"], document_id)
+            )
+            
+            # Record activity
+            record_activity(current_user["user_id"], user_id, "Rejected document", f"Document: {filename}")
+            
+            cur.execute("SELECT email FROM users WHERE id = %s", (user_id,))
+            email_row = cur.fetchone()
+            if email_row:
+                send_email(email_row[0], f"{document_type} Update", f"<html><body><p>{filename} rejected.</p></body></html>")
+        
+        conn.commit()
         return {"message": "Document rejected"}
+    except HTTPException: raise
     except Exception as e:
-        print(f"[ERROR] Supabase reject error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"[ERROR] Reject error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 @app.get("/api/documents/list")
 def list_documents(current_user: dict = Depends(verify_token)):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    conn = db_pool.getconn()
     try:
-        query = supabase.table("documents").select("*")
-        if current_user["role"] == "client":
-            res = query.or_(f"user_id.eq.{current_user['user_id']},shared_with.cs.[\"{current_user['user_id']}\"],shared_with.cs.[\"admin\"]").execute()
-        else:
-            res = query.execute()
-        return {"documents": res.data}
+        with conn.cursor() as cur:
+            if current_user["role"] in ("admin", "legal_team"):
+                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key FROM documents ORDER BY uploaded_at DESC")
+            else:
+                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key FROM documents WHERE user_id = %s ORDER BY uploaded_at DESC", (current_user["user_id"],))
+            rows = cur.fetchall()
+            return {"documents": [{"id": r[0], "user_id": r[1], "filename": r[2], "document_type": r[3], "status": r[4], "uploaded_at": r[5].isoformat() if r[5] else None, "s3_key": r[6]} for r in rows]}
     except Exception as e:
-        print(f"[ERROR] Supabase document list error: {e}")
-        return {"documents": []}
+        print(f"[ERROR] list_documents error: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally: db_pool.putconn(conn)
 
 
 
@@ -824,51 +949,63 @@ def list_documents(current_user: dict = Depends(verify_token)):
 def document_stats(current_user: dict = Depends(verify_token)):
     if current_user["role"] not in ("admin", "legal_team"):
         raise HTTPException(status_code=403, detail="Forbidden")
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
     try:
-        res = supabase.table("documents").select("size", count="exact").execute()
-        total_docs = res.count
-        total_size = sum(d["size"] for d in res.data) if res.data else 0
-        return {"total_documents": total_docs, "total_size": total_size}
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*), COALESCE(SUM(size), 0) FROM documents")
+            row = cur.fetchone()
+            return {"total_documents": row[0], "total_size": row[1]}
     except Exception as e:
-        print(f"[ERROR] Supabase stats error: {e}")
-        return {"total_documents": 0, "total_size": 0}
+        print(f"[ERROR] Stats error: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 @app.post("/api/messages/send")
 def send_message(msg: MessageSend, current_user: dict = Depends(verify_token)):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
-    new_message = {
-        "id": f"msg-{uuid.uuid4().hex[:8]}",
-        "sender_id": current_user["user_id"],
-        "recipient_id": msg.recipient_id,
-        "content": msg.content,
-        "timestamp": datetime.now().isoformat()
-    }
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
     try:
-        supabase.table("messages").insert(new_message).execute()
-        return {"message": "Message sent", "data": new_message}
+        conn = db_pool.getconn()
+        msg_id = f"msg-{uuid.uuid4().hex[:8]}"
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO messages (id, sender_id, recipient_id, content, timestamp) VALUES (%s, %s, %s, %s, %s)", 
+                        (msg_id, current_user["user_id"], msg.recipient_id, msg.content, datetime.now()))
+        conn.commit()
+        print(f"✓ [CHAT] Message sent: From {current_user['user_id']} To {msg.recipient_id}")
+        return {"message": "Message sent", "data": {"id": msg_id, "sender_id": current_user["user_id"], "recipient_id": msg.recipient_id, "content": msg.content, "timestamp": datetime.now().isoformat()}}
     except Exception as e:
-        print(f"[ERROR] Supabase message send error: {e}")
+        print(f"[ERROR] Database message send error: {e}")
+        if conn: conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 @app.get("/api/messages/list/{other_user_id}")
 def list_messages(other_user_id: str, current_user: dict = Depends(verify_token)):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
-    user_id = current_user.get("user_id")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
     try:
-        res = supabase.table("messages")\
-            .select("*")\
-            .or_(f"and(sender_id.eq.{user_id},recipient_id.eq.{other_user_id}),and(sender_id.eq.{other_user_id},recipient_id.eq.{user_id})")\
-            .order("timestamp", desc=False).execute()
-        return {"messages": res.data}
+        conn = db_pool.getconn()
+        user_id = current_user.get("user_id")
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, sender_id, recipient_id, content, timestamp FROM messages WHERE (sender_id = %s AND recipient_id = %s) OR (sender_id = %s AND recipient_id = %s) ORDER BY timestamp ASC",
+                        (user_id, other_user_id, other_user_id, user_id))
+            rows = cur.fetchall()
+            return {"messages": [{"id": r[0], "sender_id": r[1], "recipient_id": r[2], "content": r[3], "timestamp": r[4].isoformat()} for r in rows]}
     except Exception as e:
-        print(f"[ERROR] Supabase message list error: {e}")
-        return {"messages": []}
+        print(f"[ERROR] Database message list error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 
@@ -878,259 +1015,163 @@ def startup_event():
     # load_model()
     print("[INFO] Application startup complete - Model will be loaded on first use")
 @app.post("/api/contracts/share-with-client")
-async def share_contract_with_client(
-    file: UploadFile = File(...),
-    client_id: str = Form(""),
-    message: Optional[str] = Form(None),
-    current_user: dict = Depends(verify_token)
-):
+async def share_contract_with_client(file: UploadFile = File(...), client_id: str = Form(""), message: Optional[str] = Form(None), current_user: dict = Depends(verify_token)):
+    print(f"[SHARE] Role: {current_user.get('role')} | User: {current_user.get('email')} | ClientID: {client_id}")
     if current_user["role"] not in ["admin", "legal_team"]:
-        raise HTTPException(status_code=403, detail="Only legal team can share contracts")
-
+        print(f"✗ [SHARE] 403: Role {current_user['role']} not authorized")
+        raise HTTPException(status_code=403)
     content = await file.read()
-    file_name = f"shared_{current_user['user_id']}_{uuid.uuid4().hex[:6]}_{file.filename}"
+    file_name = f"shared_{uuid.uuid4().hex[:6]}_{file.filename}"
     file_path = UPLOADS_DIR / file_name
-    with open(file_path, "wb") as f:
-        f.write(content)
-
-    s3_key, s3_url = None, None
+    with open(file_path, "wb") as f: f.write(content)
+    s3_key = None
     try:
         s3_client.put_object(Bucket=BUCKET_NAME, Key=file_name, Body=content)
-        s3_key, s3_url = file_name, f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
-    except Exception as e:
-        print(f"S3 shared upload error: {e}")
-
+        s3_key = file_name
+    except Exception as e: print(f"S3 error: {e}")
     contract_id = f"sc-{uuid.uuid4().hex[:8]}"
-    new_contract = {
-        "id": contract_id,
-        "filename": file.filename,
-        "shared_by": current_user["user_id"],
-        "client_id": client_id,
-        "message": message,
-        "status": "pending_review",
-        "shared_at": datetime.now().isoformat(),
-        "s3_key": s3_key,
-        "s3_url": s3_url,
-        "file_path": str(file_path)
-    }
-
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    conn = db_pool.getconn()
     try:
-        supabase.table("shared_contracts").insert(new_contract).execute()
-        record_activity(current_user["user_id"], client_id, "Shared contract", file.filename)
-        return {"message": "Contract shared", "contract": new_contract}
-    except Exception as e:
-        print(f"[ERROR] Supabase share contract error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-
-    raise HTTPException(status_code=404, detail="Contract not found")
-
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO shared_contracts (id, filename, shared_by, client_id, message, status, shared_at, s3_key, file_path) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (contract_id, file.filename, current_user["user_id"], client_id, message, 'pending_review', datetime.now(), s3_key, str(file_path)))
+            conn.commit()
+            record_activity(current_user["user_id"], client_id, "Shared contract", file.filename)
+            return {"message": "Shared", "id": contract_id}
+    finally: db_pool.putconn(conn)
 
 @app.get("/api/contracts/from-legal")
 def get_contracts_from_legal(current_user: dict = Depends(verify_token)):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    conn = db_pool.getconn()
     try:
-        res = supabase.table("shared_contracts").select("*").eq("client_id", current_user["user_id"]).execute()
-        return {"contracts": res.data}
-    except Exception as e:
-        print(f"[ERROR] Supabase get contracts error: {e}")
-        return {"contracts": []}
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM shared_contracts WHERE client_id = %s", (current_user["user_id"],))
+            rows = cur.fetchall()
+            return {"contracts": [{"id": r[0], "filename": r[1], "shared_by": r[2], "client_id": r[3], "message": r[4], "status": r[5], "shared_at": r[6].isoformat(), "s3_key": r[7]} for r in rows]}
+    finally: db_pool.putconn(conn)
 
 @app.post("/api/contracts/accept/{contract_id}")
 def accept_shared_contract(contract_id: str, current_user: dict = Depends(verify_token)):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    conn = db_pool.getconn()
     try:
-        # Update and fetch for activity log
-        res = supabase.table("shared_contracts").update({
-            "status": "accepted", 
-            "accepted_at": datetime.now().isoformat()
-        }).eq("id", contract_id).eq("client_id", current_user["user_id"]).execute()
-        
-        if res.data:
-            record_activity(current_user["user_id"], current_user["user_id"], "Accepted contract", res.data[0]["filename"])
-            return {"message": "Accepted", "contract": res.data[0]}
-        raise HTTPException(status_code=404, detail="Contract not found")
-    except HTTPException: raise
-    except Exception as e:
-        print(f"[ERROR] Supabase accept error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        with conn.cursor() as cur:
+            cur.execute("UPDATE shared_contracts SET status = 'accepted', accepted_at = %s WHERE id = %s AND client_id = %s RETURNING filename", (datetime.now(), contract_id, current_user["user_id"]))
+            row = cur.fetchone()
+            if row:
+                conn.commit()
+                record_activity(current_user["user_id"], current_user["user_id"], "Accepted contract", row[0])
+                return {"message": "Accepted"}
+            raise HTTPException(status_code=404)
+    finally: db_pool.putconn(conn)
 
 
 
 @app.get("/api/activity/list")
 def list_activities(client_id: Optional[str] = None, current_user: dict = Depends(verify_token)):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    conn = db_pool.getconn()
     try:
-        query = supabase.table("activity_log").select("*")
-        if current_user["role"] == "client":
-            query = query.eq("client_id", current_user["user_id"])
-        elif client_id:
-            query = query.eq("client_id", client_id)
-        res = query.order("timestamp", desc=True).limit(100).execute()
-        return {"activities": res.data}
-    except Exception as e:
-        print(f"[ERROR] Supabase activity list error: {e}")
-        return {"activities": []}
+        with conn.cursor() as cur:
+            if current_user["role"] == "client":
+                cur.execute("SELECT id, user_id, client_id, action, details, timestamp FROM activity_log WHERE client_id = %s ORDER BY timestamp DESC LIMIT 100", (current_user["user_id"],))
+            elif client_id:
+                cur.execute("SELECT id, user_id, client_id, action, details, timestamp FROM activity_log WHERE client_id = %s ORDER BY timestamp DESC LIMIT 100", (client_id,))
+            else:
+                cur.execute("SELECT id, user_id, client_id, action, details, timestamp FROM activity_log ORDER BY timestamp DESC LIMIT 100")
+            rows = cur.fetchall()
+            return {"activities": [{"id": r[0], "user_id": r[1], "client_id": r[2], "action": r[3], "details": r[4], "timestamp": r[5].isoformat()} for r in rows]}
+    finally: db_pool.putconn(conn)
 
 
 
 @app.get("/api/contracts/download/{contract_id}")
-def download_shared_contract(
-    contract_id: str,
-    current_user: dict = Depends(verify_token)
-):
-    shared_contracts = load_json(SHARED_CONTRACTS_FILE)
-    contract = next((c for c in shared_contracts if c["id"] == contract_id), None)
-
-    if not contract:
-        raise HTTPException(status_code=404, detail="Contract not found")
-
-    # Only the intended client or the sharer can download
-    if current_user["role"] == "client" and contract["client_id"] != current_user["user_id"]:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    s3_key = contract.get("s3_key")
-    if s3_key:
-        try:
-            url = s3_client.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
-                ExpiresIn=3600
-            )
-            return {"download_url": url}
-        except ClientError as e:
-            print(f"S3 presigned URL error: {e}")
-
-    # Fallback: serve from local file
-    file_path = Path(contract.get("file_path", ""))
-    if file_path.exists():
-        from fastapi.responses import FileResponse
-        return FileResponse(
-            path=str(file_path),
-            filename=contract["filename"],
-            media_type="application/octet-stream"
-        )
-
-    raise HTTPException(status_code=404, detail="File not found on server")
+def download_shared_contract(contract_id: str, current_user: dict = Depends(verify_token)):
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT s3_key, client_id, file_path, filename FROM shared_contracts WHERE id = %s", (contract_id,))
+            res = cur.fetchone()
+            if not res: raise HTTPException(status_code=404)
+            if current_user["role"] == "client" and res[1] != current_user["user_id"]: raise HTTPException(status_code=403)
+            s3_key = res[0]
+            if s3_key:
+                try:
+                    url = s3_client.generate_presigned_url('get_object', Params={'Bucket': BUCKET_NAME, 'Key': s3_key}, ExpiresIn=3600)
+                    return {"download_url": url}
+                except: pass
+            fp = Path(res[2] or "")
+            if fp.exists(): return FileResponse(path=str(fp), filename=res[3])
+            raise HTTPException(status_code=404)
+    finally: db_pool.putconn(conn)
 
 
 @app.post("/api/templates/upload")
 async def upload_template(background_tasks: BackgroundTasks, file: UploadFile = File(...), template_type: str = Form(...), current_user: dict = Depends(verify_token)):
-    if current_user["role"] not in ["admin", "legal_team"]:
-        raise HTTPException(status_code=403, detail="Forbidden")
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Database not connected")
-
+    if current_user["role"] not in ["admin", "legal_team"]: raise HTTPException(status_code=403)
     content = await file.read()
     file_name = f"template_{uuid.uuid4().hex[:8]}_{file.filename}"
     file_path = UPLOADS_DIR / file_name
     with open(file_path, "wb") as f: f.write(content)
-    
+    try: s3_client.put_object(Bucket=BUCKET_NAME, Key=file_name, Body=content)
+    except: pass
+    tmpl_id = f"tmpl-{uuid.uuid4().hex[:8]}"
+    conn = db_pool.getconn()
     try:
-        s3_client.put_object(Bucket=BUCKET_NAME, Key=file_name, Body=content)
-        s3_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
-    except Exception: s3_url = None
-    
-    new_template = {
-        "id": f"tmpl-{uuid.uuid4().hex[:8]}",
-        "filename": file.filename,
-        "document_type": "template", "template_type": template_type,
-        "uploaded_by": current_user["user_id"],
-        "uploaded_at": datetime.now().isoformat(),
-        "s3_url": s3_url, "s3_key": file_name, "file_path": str(file_path)
-    }
-    
-    try:
-        supabase.table("documents").insert(new_template).execute()
-        background_tasks.add_task(trigger_extraction, file_name, template_type, "legal")
-        return {"message": "Template uploaded", "template": new_template}
-    except Exception as e:
-        print(f"[ERROR] Supabase template upload error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save template metadata")
+        with conn.cursor() as cur:
+            cur.execute("INSERT INTO documents (id, filename, document_type, template_type, uploaded_by, uploaded_at, s3_key, file_path) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                        (tmpl_id, file.filename, 'template', template_type, current_user["user_id"], datetime.now(), file_name, str(file_path)))
+            conn.commit()
+            background_tasks.add_task(trigger_extraction, file_name, template_type, "legal")
+            return {"message": "Uploaded", "id": tmpl_id}
+    finally: db_pool.putconn(conn)
 
 
 @app.get("/api/templates/analysis/{template_id}")
-def get_template_analysis(
-    template_id: str,
-    current_user: dict = Depends(verify_token)
-):
-    templates = load_json(TEMPLATES_FILE)
-    tmpl = next((t for t in templates if t["id"] == template_id), None)
-    
-    if not tmpl:
-        raise HTTPException(status_code=404, detail="Template not found")
-        
-    s3_key = tmpl.get("s3_key")
-    if not s3_key:
-        raise HTTPException(status_code=400, detail="Template analysis not available")
-        
-    json_filename = str(Path(s3_key).with_suffix('.json'))
-    analysis_path = Path(__file__).parent.parent / "extracter" / "extracted_texts" / json_filename
-    
-    if not analysis_path.exists():
-        print(f"⚠️ Template analysis file not found at: {analysis_path}")
-        return {"document": tmpl, "clauses": [], "status": "processing"}
-        
+def get_template_analysis(template_id: str, current_user: dict = Depends(verify_token)):
+    conn = db_pool.getconn()
     try:
-        with open(analysis_path, "r", encoding="utf-8") as f:
-            clauses = json.load(f)
-        return {"document": tmpl, "clauses": clauses, "status": "complete"}
-    except Exception as e:
-        print(f"❌ Error reading template analysis file: {e}")
-        raise HTTPException(status_code=500, detail=f"Error reading analysis: {str(e)}")
+        with conn.cursor() as cur:
+            cur.execute("SELECT s3_key FROM documents WHERE id = %s", (template_id,))
+            res = cur.fetchone()
+            if not res or not res[0]: raise HTTPException(status_code=404)
+            s3_key = res[0]
+            json_filename = str(Path(s3_key).with_suffix('.json'))
+            analysis_path = Path(__file__).parent.parent / "extracter" / "extracted_texts" / json_filename
+            if analysis_path.exists():
+                with open(analysis_path, "r", encoding="utf-8") as f:
+                    return {"clauses": json.load(f), "status": "complete"}
+            return {"clauses": [], "status": "processing"}
+    finally: db_pool.putconn(conn)
 
 
 @app.get("/api/templates/download/{template_id}")
-def download_template(
-    template_id: str,
-    current_user: dict = Depends(verify_token)
-):
-    templates = load_json(TEMPLATES_FILE)
-    tmpl = next((t for t in templates if t["id"] == template_id), None)
-    
-    if not tmpl:
-        raise HTTPException(status_code=404, detail="Template not found")
-        
-    s3_key = tmpl.get("s3_key")
-    if s3_key:
-        try:
-            url = s3_client.generate_presigned_url(
-                'get_object',
-                Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
-                ExpiresIn=3600
-            )
-            return {"download_url": url}
-        except ClientError as e:
-            print(f"S3 Error for template {template_id}: {e}")
+def download_template(template_id: str, current_user: dict = Depends(verify_token)):
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT s3_key, file_path, filename FROM documents WHERE id = %s", (template_id,))
+            res = cur.fetchone()
+            if not res: raise HTTPException(status_code=404)
+            if res[0]:
+                try:
+                    url = s3_client.generate_presigned_url('get_object', Params={'Bucket': BUCKET_NAME, 'Key': res[0]}, ExpiresIn=3600)
+                    return {"download_url": url}
+                except: pass
+            fp = Path(res[1] or "")
+            if fp.exists(): return FileResponse(path=str(fp), filename=res[2])
+            raise HTTPException(status_code=404)
+    finally: db_pool.putconn(conn)
 
-    # Fallback to local file if not on S3 or S3 fails
-    file_path = Path(tmpl.get("file_path", ""))
-    if file_path.exists():
-        from fastapi.responses import FileResponse
-        return FileResponse(
-            path=str(file_path),
-            filename=tmpl["filename"],
-            media_type="application/octet-stream"
-        )
-    raise HTTPException(status_code=400, detail="Template not available")
 
 
 @app.get("/api/templates/list")
 def list_templates(current_user: dict = Depends(verify_token)):
-    if not supabase:
-        raise HTTPException(status_code=500, detail="Supabase not connected")
+    conn = db_pool.getconn()
     try:
-        res = supabase.table("documents").select("*").eq("document_type", "template").execute()
-        return {"templates": res.data}
-    except Exception as e:
-        print(f"[ERROR] Supabase template list error: {e}")
-        return {"templates": []}
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, filename, template_type, uploaded_at FROM documents WHERE document_type = 'template'")
+            rows = cur.fetchall()
+            return {"templates": [{"id": r[0], "filename": r[1], "template_type": r[2], "uploaded_at": r[3].isoformat()} for r in rows]}
+    finally: db_pool.putconn(conn)
 
 
 
@@ -1141,51 +1182,32 @@ def list_templates(current_user: dict = Depends(verify_token)):
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/documents/review/{document_id}")
-def get_document_review(
-    document_id: str,
-    current_user: dict = Depends(verify_token)
-):
-    """
-    Return the risk-tagged clause review for a document.
-    Falls back to the basic analysis JSON if a review file doesn't exist yet.
-    """
-    documents = load_json(DOCUMENTS_FILE)
-    doc = next((d for d in documents if d["id"] == document_id), None)
+def get_document_review(document_id: str, current_user: dict = Depends(verify_token)):
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, user_id, s3_key FROM documents WHERE id = %s", (document_id,))
+            doc = cur.fetchone()
+            if not doc: raise HTTPException(status_code=404)
+            if current_user["role"] == "client" and doc[1] != current_user["user_id"]: raise HTTPException(status_code=403)
+            
+            # Risk file check
+            reviews_dir = DATA_DIR / "reviews"
+            review_path = reviews_dir / f"{document_id}.json"
+            if review_path.exists():
+                with open(review_path, "r", encoding="utf-8") as f:
+                    return {"clauses": json.load(f), "status": "complete"}
+            
+            # Fallback analysis
+            if doc[2]:
+                base = Path(doc[2]).stem
+                fallback = Path(__file__).parent.parent / "extracter" / "extracted_texts" / f"{base}.json"
+                if fallback.exists():
+                    with open(fallback, "r", encoding="utf-8") as f:
+                        return {"clauses": json.load(f), "status": "processing"}
+            return {"clauses": [], "status": "processing"}
+    finally: db_pool.putconn(conn)
 
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
-
-    # Access control
-    if current_user["role"] == "client" and doc["user_id"] != current_user["user_id"]:
-        raise HTTPException(status_code=403, detail="Access denied")
-
-    # Primary: risk review file
-    reviews_dir = DATA_DIR / "reviews"
-    review_path = reviews_dir / f"{document_id}.json"
-
-    if review_path.exists():
-        try:
-            with open(review_path, "r", encoding="utf-8") as f:
-                clauses = json.load(f)
-            return {"document": doc, "clauses": clauses, "status": "complete"}
-        except Exception as e:
-            print(f"❌ Error reading review file: {e}")
-
-    # Fallback: basic analysis JSON (no risk scores yet)
-    s3_key = doc.get("s3_key")
-    if s3_key:
-        base = Path(s3_key).stem
-        extracter_dir = Path(__file__).parent.parent / "extracter" / "extracted_texts"
-        fallback = extracter_dir / f"{base}.json"
-        if fallback.exists():
-            try:
-                with open(fallback, "r", encoding="utf-8") as f:
-                    clauses = json.load(f)
-                return {"document": doc, "clauses": clauses, "status": "processing"}
-            except Exception:
-                pass
-
-    return {"document": doc, "clauses": [], "status": "processing"}
 
 
 class ClauseActionRequest(BaseModel):
@@ -1194,43 +1216,56 @@ class ClauseActionRequest(BaseModel):
 
 
 @app.post("/api/documents/review/{document_id}/action")
-def clause_action(
-    document_id: str,
-    req: ClauseActionRequest,
-    current_user: dict = Depends(verify_token)
-):
-    """Accept or reject a specific clause in the review."""
+def clause_action(document_id: str, req: ClauseActionRequest, current_user: dict = Depends(verify_token)):
     if req.action not in ("accept", "reject"):
         raise HTTPException(status_code=400, detail="action must be 'accept' or 'reject'")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM documents WHERE id = %s", (document_id,))
+            doc = cur.fetchone()
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            # Simple access check
+            if current_user["role"] == "client" and doc[0] != current_user["user_id"]:
+                raise HTTPException(status_code=403, detail="Forbidden")
 
-    documents = load_json(DOCUMENTS_FILE)
-    doc = next((d for d in documents if d["id"] == document_id), None)
-    if not doc:
-        raise HTTPException(status_code=404, detail="Document not found")
 
-    reviews_dir = DATA_DIR / "reviews"
-    review_path = reviews_dir / f"{document_id}.json"
+        reviews_dir = DATA_DIR / "reviews"
+        review_path = reviews_dir / f"{document_id}.json"
 
-    if not review_path.exists():
-        raise HTTPException(status_code=404, detail="Review not ready yet — please wait for processing")
+        if not review_path.exists():
+            raise HTTPException(status_code=404, detail="Review not ready yet — please wait for processing")
 
-    with open(review_path, "r", encoding="utf-8") as f:
-        clauses = json.load(f)
+        with open(review_path, "r", encoding="utf-8") as f:
+            clauses = json.load(f)
 
-    updated = False
-    for clause in clauses:
-        if clause.get("content_id") == req.content_id:
-            clause["status"] = "accepted" if req.action == "accept" else "rejected"
-            updated = True
-            break
+        updated = False
+        for clause in clauses:
+            if clause.get("content_id") == req.content_id:
+                clause["status"] = "accepted" if req.action == "accept" else "rejected"
+                updated = True
+                break
 
-    if not updated:
-        raise HTTPException(status_code=404, detail="Clause not found")
+        if not updated:
+            raise HTTPException(status_code=404, detail="Clause not found")
 
-    with open(review_path, "w", encoding="utf-8") as f:
-        json.dump(clauses, f, indent=2)
+        with open(review_path, "w", encoding="utf-8") as f:
+            json.dump(clauses, f, indent=2)
 
-    return {"message": f"Clause {req.action}ed", "content_id": req.content_id}
+        return {"message": f"Clause {req.action}ed", "content_id": req.content_id}
+    except HTTPException: raise
+    except Exception as e:
+        print(f"[ERROR] Clause action error: {e}")
+        raise HTTPException(status_code=500, detail="Processing error")
+    finally:
+        if conn: db_pool.putconn(conn)
+
 
 
 class AskLLMRequest(BaseModel):
