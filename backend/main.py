@@ -1033,8 +1033,8 @@ async def share_contract_with_client(file: UploadFile = File(...), client_id: st
     conn = db_pool.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO shared_contracts (id, filename, shared_by, client_id, message, status, shared_at, s3_key, file_path) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (contract_id, file.filename, current_user["user_id"], client_id, message, 'pending_review', datetime.now(), s3_key, str(file_path)))
+            cur.execute("INSERT INTO shared_contracts (id, filename, shared_by, shared_by_email, client_id, message, status, shared_at, s3_key, file_path) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (contract_id, file.filename, current_user["user_id"], current_user.get("email", ""), client_id, message, 'pending_review', datetime.now(), s3_key, str(file_path)))
             conn.commit()
             record_activity(current_user["user_id"], client_id, "Shared contract", file.filename)
             return {"message": "Shared", "id": contract_id}
@@ -1045,9 +1045,9 @@ def get_contracts_from_legal(current_user: dict = Depends(verify_token)):
     conn = db_pool.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT * FROM shared_contracts WHERE client_id = %s", (current_user["user_id"],))
+            cur.execute("SELECT id, filename, document_type, shared_by, shared_by_email, message, size, status, shared_at, s3_key FROM shared_contracts WHERE client_id = %s ORDER BY shared_at DESC", (current_user["user_id"],))
             rows = cur.fetchall()
-            return {"contracts": [{"id": r[0], "filename": r[1], "shared_by": r[2], "client_id": r[3], "message": r[4], "status": r[5], "shared_at": r[6].isoformat(), "s3_key": r[7]} for r in rows]}
+            return {"contracts": [{"id": r[0], "filename": r[1], "document_type": r[2], "shared_by": r[3], "shared_by_email": r[4], "message": r[5], "size": r[6] or 0, "status": r[7], "shared_at": r[8].isoformat() if r[8] else None, "s3_key": r[9]} for r in rows]}
     finally: db_pool.putconn(conn)
 
 @app.post("/api/contracts/accept/{contract_id}")
@@ -1117,8 +1117,8 @@ async def upload_template(background_tasks: BackgroundTasks, file: UploadFile = 
     conn = db_pool.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO documents (id, filename, document_type, template_type, uploaded_by, uploaded_at, s3_key, file_path) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                        (tmpl_id, file.filename, 'template', template_type, current_user["user_id"], datetime.now(), file_name, str(file_path)))
+            cur.execute("INSERT INTO documents (id, filename, document_type, template_type, user_id, user_email, user_role, uploaded_at, s3_key, file_path) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (tmpl_id, file.filename, 'template', template_type, current_user["user_id"], current_user.get("email", ""), current_user.get("role", "admin"), datetime.now(), file_name, str(file_path)))
             conn.commit()
             background_tasks.add_task(trigger_extraction, file_name, template_type, "legal")
             return {"message": "Uploaded", "id": tmpl_id}
