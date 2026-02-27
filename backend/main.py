@@ -518,9 +518,8 @@ def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
                     except Exception as e:
                         print(f"[ERROR] Local file cleanup error: {e}")
 
-            # 3. DB cleanup - Cascade should handle it if set, but we do it explicitly
-            cur.execute("DELETE FROM document_history WHERE document_id IN (SELECT id FROM documents WHERE user_id = %s)", (client_id,))
-            cur.execute("DELETE FROM document_analysis WHERE document_id IN (SELECT id FROM documents WHERE user_id = %s)", (client_id,))
+            # 3. DB cleanup - Cascade should handle it if set, but we do it explicitly to handle clauses
+            cur.execute("DELETE FROM clauses WHERE document_id IN (SELECT id FROM documents WHERE user_id = %s)", (client_id,))
             cur.execute("DELETE FROM documents WHERE user_id = %s", (client_id,))
             cur.execute("DELETE FROM users WHERE id = %s", (client_id,))
         conn.commit()
