@@ -8,3 +8,5 @@ frontend/.env.local
 frontend/.env.production 
 frontend/.env.test                                                              
 .venv
+__pycache__/
+*.pyc
