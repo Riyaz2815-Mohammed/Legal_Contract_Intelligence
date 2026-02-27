@@ -8,21 +8,21 @@
  }
 
  .status-approved {
-     background-color: rgba(16, 185, 129, 0.1);
-     color: #10b981;
-     border: 1px solid rgba(16, 185, 129, 0.2);
+     background-color: #d1fae5;
+     color: #065f46;
+     border: 1px solid #a7f3d0;
  }
 
  .status-pending {
-     background-color: rgba(245, 158, 11, 0.1);
-     color: #f59e0b;
-     border: 1px solid rgba(245, 158, 11, 0.2);
+     background-color: #fef3c7;
+     color: #92400e;
+     border: 1px solid #fde68a;
  }
 
  .status-rejected {
-     background-color: rgba(239, 68, 68, 0.1);
-     color: #ef4444;
-     border: 1px solid rgba(239, 68, 68, 0.2);
+     background-color: #fee2e2;
+     color: #991b1b;
+     border: 1px solid #fecaca;
  }
 
  .status-default {

@@ -47,13 +47,6 @@ function ClientForm({ onClientCreated }) {
     return (
         <>
             <div className="client-form-container">
-                <div className="form-header">
-                    <svg className="icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                    </svg>
-                    <h3>Send Client Credentials</h3>
-                </div>
-
                 <form onSubmit={handleSubmit}>
                     <div className="form-group">
                         <label htmlFor="clientName">Client Name</label>
@@ -92,14 +85,19 @@ function ClientForm({ onClientCreated }) {
                         </div>
                     )}
 
-                    <button type="submit" className="btn-submit" disabled={loading}>
+                    <button type="submit" className="btn btn-primary" style={{ width: '100%', marginTop: '1rem', padding: '0.875rem', borderRadius: '10px' }} disabled={loading}>
                         {loading ? (
                             <>
                                 <span className="spinner-small"></span>
                                 <span>Processing...</span>
                             </>
                         ) : (
-                            <span>Invite Client</span>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                                <span>Send Credentials</span>
+                                <svg style={{ width: '18px', height: '18px' }} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M14 5l7 7m0 0l-7 7m7-7H3" />
+                                </svg>
+                            </div>
                         )}
                     </button>
                 </form>

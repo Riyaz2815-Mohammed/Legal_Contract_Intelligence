@@ -84,8 +84,12 @@ function LegalTeam({ user, onLogout }) {
                     <h3>Active Legal Team Members</h3>
                 </div>
 
-                <div className="table-wrapper">
-                    <LegalTeamTable members={members} loading={loading} onDelete={handleMemberDelete} />
+                <div style={{ marginTop: '1rem' }}>
+                    <LegalTeamTable
+                        members={members}
+                        loading={loading}
+                        onDelete={handleMemberDelete}
+                    />
                 </div>
             </div>
 

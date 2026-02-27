@@ -6,19 +6,15 @@ const Sidebar = ({ user, onLogout, isCollapsed, onToggle }) => {
     return (
         <aside className={`sidebar ${isCollapsed ? 'collapsed' : ''}`}>
             <div className="sidebar-header">
-                <div className="sidebar-logo">
-                    <div className="logo-icon">L</div>
-                    {!isCollapsed && <span className="logo-text">LACCIS</span>}
+                <div className="sidebar-logo" onClick={onToggle} title={isCollapsed ? "Expand Sidebar" : "Collapse Sidebar"}>
+                    <div className="logo-icon-container">
+                        <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect width="32" height="32" rx="8" fill="#3B5998" />
+                            <path d="M12 8C12 7.44772 12.4477 7 13 7H15C15.5523 7 16 7.44772 16 8V19H22C22.5523 19 23 19.4477 23 20V22C23 22.5523 22.5523 23 22 23H13C12.4477 23 12 22.5523 12 22V8Z" fill="white" />
+                        </svg>
+                    </div>
+                    {!isCollapsed && <span className="logo-text">ACCIS</span>}
                 </div>
-                <button className="collapse-toggle" onClick={onToggle}>
-                    <svg className="toggle-icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        {isCollapsed ? (
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 5l7 7-7 7M5 5l7 7-7 7" />
-                        ) : (
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7" />
-                        )}
-                    </svg>
-                </button>
             </div>
 
             <nav className="sidebar-nav">

@@ -17,7 +17,8 @@
     font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    background: #f8fafc;
+    background: #ffffff;
+    border-bottom: 2px solid #f1f5f9;
 }
 
 .table tr:hover td {

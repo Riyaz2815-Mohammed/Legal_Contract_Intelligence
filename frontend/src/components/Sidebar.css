@@ -10,7 +10,6 @@
     top: 0;
     z-index: 100;
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.04);
 }
 
 .sidebar.collapsed {
@@ -29,52 +28,39 @@
 .sidebar-logo {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 4px;
+    cursor: pointer;
+    user-select: none;
+}
+
+.logo-icon-container {
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .logo-icon {
     min-width: 32px;
     width: 32px;
     height: 32px;
-    background: linear-gradient(135deg, #2563EB 0%, #1d4ed8 100%);
-    border-radius: 8px;
     display: flex;
     align-items: center;
     justify-content: center;
-    font-weight: bold;
-    color: white;
+    color: #2563EB;
+    /* This powers the SVG's currentColor fill */
+}
+
+.brand-l-svg {
+    width: 100%;
+    height: 100%;
 }
 
 .logo-text {
-    font-size: 1.125rem;
-    font-weight: 700;
-    color: #1e293b;
-    letter-spacing: 0.5px;
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.01em;
     white-space: nowrap;
-}
-
-.collapse-toggle {
-    background: #f1f5f9;
-    border: none;
-    border-radius: 8px;
-    width: 28px;
-    height: 28px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #64748b;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.collapse-toggle:hover {
-    background: #e2e8f0;
-    color: #1e293b;
-}
-
-.toggle-icon {
-    width: 16px;
-    height: 16px;
 }
 
 .sidebar-nav {
@@ -97,6 +83,8 @@
     white-space: nowrap;
     font-size: 0.875rem;
     font-weight: 500;
+    position: relative;
+    overflow: hidden;
 }
 
 .sidebar.collapsed .nav-item {
@@ -105,13 +93,25 @@
 }
 
 .nav-item:hover {
-    background: #f1f5f9;
+    background: #f8fafc;
     color: #1e293b;
 }
 
 .nav-item.active {
     background: #EFF6FF;
     color: #2563EB;
+}
+
+.nav-item.active::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    height: 60%;
+    width: 4px;
+    background: #2563EB;
+    border-radius: 0 4px 4px 0;
 }
 
 .nav-icon {
@@ -144,9 +144,9 @@
     min-width: 36px;
     width: 36px;
     height: 36px;
-    background: #EFF6FF;
+    background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%);
     border: 1px solid #BFDBFE;
-    border-radius: 10px;
+    border-radius: 50%;
     display: flex;
     align-items: center;
     justify-content: center;

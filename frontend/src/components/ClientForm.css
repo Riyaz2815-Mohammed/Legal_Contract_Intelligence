@@ -1,8 +1,5 @@
 .client-form-container {
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 16px;
-    padding: 1.5rem;
+    width: 100%;
 }
 
 .form-header {
