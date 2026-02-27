@@ -419,7 +419,7 @@ def create_legal_team_member(member: LegalTeamMemberCreate, current_user: dict =
 
 @app.get("/api/legal/list")
 def list_legal_team(current_user: dict = Depends(verify_token)):
-    if current_user["role"] != "admin":
+    if current_user["role"] not in ["admin", "client", "legal_team"]:
         raise HTTPException(status_code=403, detail="Forbidden")
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database not connected")
@@ -428,9 +428,14 @@ def list_legal_team(current_user: dict = Depends(verify_token)):
     try:
         conn = db_pool.getconn()
         with conn.cursor() as cur:
-            cur.execute("SELECT id, name, email, created_at FROM users WHERE role = 'legal_team'")
-            rows = cur.fetchall()
-            members = [{"id": r[0], "name": r[1], "email": r[2], "created_at": r[3].isoformat() if r[3] else None} for r in rows]
+            if current_user["role"] == "admin":
+                cur.execute("SELECT id, name, email, created_at FROM users WHERE role = 'legal_team'")
+                rows = cur.fetchall()
+                members = [{"id": r[0], "name": r[1], "email": r[2], "created_at": r[3].isoformat() if r[3] else None} for r in rows]
+            else:
+                cur.execute("SELECT id, name, email FROM users WHERE role IN ('legal_team', 'admin')")
+                rows = cur.fetchall()
+                members = [{"id": r[0], "name": r[1], "email": r[2]} for r in rows]
             return {"members": members}
     except Exception as e:
         print(f"[ERROR] list_legal_team error: {e}")
@@ -580,10 +585,46 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
         raw_blocks = parse_text_file(str(txt_path))
         results = process_document(raw_blocks, document=document_type, source=source)
 
-        temp_json_path = json_path.with_suffix('.json.tmp')
-        with open(temp_json_path, "w", encoding="utf-8") as f:
-            json.dump(results, f, indent=2, ensure_ascii=False)
-        temp_json_path.replace(json_path)
+        # (JSON storage was removed per user request, DB storage only)
+        
+        # 4. Insert into clauses table
+        conn = None
+        try:
+            if db_pool:
+                conn = db_pool.getconn()
+                with conn.cursor() as cur:
+                    # Find corresponding document_id by s3_key matching file_name
+                    cur.execute("SELECT id FROM documents WHERE s3_key = %s LIMIT 1", (file_name,))
+                    doc_res = cur.fetchone()
+                    document_id = doc_res[0] if doc_res else None
+                    
+                    for idx, clause in enumerate(results):
+                        clause_id = clause.get("clause_id") or f"CLZ-{uuid.uuid4().hex[:8]}"
+                        content_id = clause.get("content_id") or f"CNT-{uuid.uuid4().hex[:8]}"
+                        cur.execute(
+                            """
+                            INSERT INTO clauses (clause_id, clause, content_id, content, page_number, document, source, document_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                            ON CONFLICT (content_id) DO NOTHING
+                            """,
+                            (
+                                clause_id,
+                                clause.get("clause", "Unknown"),
+                                content_id,
+                                clause.get("content", ""),
+                                clause.get("page_number", 1),
+                                document_type,
+                                source,
+                                document_id
+                            )
+                        )
+                conn.commit()
+                print(f"[SUCCESS] [Background] Saved {len(results)} clauses to database")
+        except Exception as db_err:
+            print(f"[ERROR] [Background] Failed to save clauses to database: {db_err}")
+            if conn: conn.rollback()
+        finally:
+            if conn: db_pool.putconn(conn)
 
         print(f"[SUCCESS] [Background] Classification complete: {len(results)} clauses saved to {json_path}")
 
@@ -725,23 +766,28 @@ def get_document_analysis(document_id: str, current_user: dict = Depends(verify_
                 "shared_with": row[8], "uploaded_at": row[9].isoformat() if row[9] else None,
                 "file_path": row[10], "s3_url": row[11], "s3_key": row[12]
             }
-            s3_key = doc["s3_key"]
+            # Query clauses from database
+            cur.execute(
+                "SELECT clause_id, clause, content_id, content, page_number FROM clauses WHERE document_id = %s ORDER BY page_number ASC",
+                (document_id,)
+            )
+            clause_rows = cur.fetchall()
             
-            if not s3_key:
-                raise HTTPException(status_code=400, detail="Analysis not available, missing S3 key")
-            
-            json_filename = str(Path(s3_key).with_suffix('.json'))
-            analysis_path = Path(__file__).parent.parent / "extracter" / "extracted_texts" / json_filename
-            
-            if not analysis_path.exists():
+            if not clause_rows:
                 return {"document": doc, "clauses": [], "status": "processing"}
                 
-            try:
-                with open(analysis_path, "r", encoding="utf-8") as f:
-                    clauses_data = json.load(f)
-                return {"document": doc, "clauses": clauses_data, "status": "complete"}
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Error reading analysis file: {str(e)}")
+            clauses_data = [
+                {
+                    "clause_id": r[0],
+                    "clause": r[1],
+                    "content_id": r[2],
+                    "content": r[3],
+                    "page_number": r[4]
+                }
+                for r in clause_rows
+            ]
+            
+            return {"document": doc, "clauses": clauses_data, "status": "complete"}
                 
     except HTTPException:
         # Re-raise HTTP exceptions directly
@@ -909,7 +955,7 @@ def list_documents(current_user: dict = Depends(verify_token)):
             if current_user["role"] in ("admin", "legal_team"):
                 cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with FROM documents ORDER BY uploaded_at DESC")
             else:
-                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with FROM documents WHERE user_id = %s OR %s = ANY(shared_with) ORDER BY uploaded_at DESC", (current_user["user_id"], current_user["user_id"]))
+                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with FROM documents WHERE user_id = %s OR shared_with @> %s::jsonb ORDER BY uploaded_at DESC", (current_user["user_id"], json.dumps([current_user["user_id"]])))
             rows = cur.fetchall()
             return {"documents": [{"id": r[0], "user_id": r[1], "filename": r[2], "document_type": r[3], "status": r[4], "uploaded_at": r[5].isoformat() if r[5] else None, "s3_key": r[6], "size": r[7], "shared_with": r[8]} for r in rows]}
     except Exception as e:
@@ -1104,16 +1150,27 @@ def get_template_analysis(template_id: str, current_user: dict = Depends(verify_
     conn = db_pool.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT s3_key FROM documents WHERE id = %s", (template_id,))
-            res = cur.fetchone()
-            if not res or not res[0]: raise HTTPException(status_code=404)
-            s3_key = res[0]
-            json_filename = str(Path(s3_key).with_suffix('.json'))
-            analysis_path = Path(__file__).parent.parent / "extracter" / "extracted_texts" / json_filename
-            if analysis_path.exists():
-                with open(analysis_path, "r", encoding="utf-8") as f:
-                    return {"clauses": json.load(f), "status": "complete"}
-            return {"clauses": [], "status": "processing"}
+            cur.execute(
+                "SELECT clause_id, clause, content_id, content, page_number FROM clauses WHERE document_id = %s ORDER BY page_number ASC",
+                (template_id,)
+            )
+            clause_rows = cur.fetchall()
+            
+            if not clause_rows:
+                return {"clauses": [], "status": "processing"}
+                
+            clauses_data = [
+                {
+                    "clause_id": r[0],
+                    "clause": r[1],
+                    "content_id": r[2],
+                    "content": r[3],
+                    "page_number": r[4]
+                }
+                for r in clause_rows
+            ]
+            
+            return {"clauses": clauses_data, "status": "complete"}
     finally: db_pool.putconn(conn)
 
 
@@ -1277,21 +1334,6 @@ def ask_llm_about_clause(
         return {"answer": answer, "content_id": req.content_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
-@app.get("/api/legal/list")
-def list_legal_team(current_user: dict = Depends(verify_token)):
-    """Return all members explicitly marked as legal_team or admin for the client to chat with."""
-    if not db_pool:
-        raise HTTPException(status_code=500, detail="Database not connected")
-    conn = None
-    try:
-        conn = db_pool.getconn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT id, name, email FROM users WHERE role IN ('legal_team', 'admin')")
-            rows = cur.fetchall()
-            return {"members": [{"id": r[0], "name": r[1], "email": r[2], "role": "legal_team"} for r in rows]}
-    except Exception as e:
-        print(f"[ERROR] Error listing legal team: {e}")
-        raise HTTPException(status_code=500, detail="Database error")
     finally:
         if conn: db_pool.putconn(conn)
 
