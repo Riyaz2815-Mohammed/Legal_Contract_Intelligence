@@ -1,7 +1,7 @@
 from langchain_mistralai import ChatMistralAI
 from langchain_core.output_parsers import StrOutputParser
-from llm.prompt import LEGAL_ANALYSIS_PROMPT
-from config.settings import MISTRAL_API_KEY, MISTRAL_MODEL, MISTRAL_TEMPERATURE
+from vector_pipeline.llm.prompt import LEGAL_ANALYSIS_PROMPT
+from vector_pipeline.config.settings import MISTRAL_API_KEY, MISTRAL_MODEL, MISTRAL_TEMPERATURE
 import logging
 
 logger = logging.getLogger(__name__)

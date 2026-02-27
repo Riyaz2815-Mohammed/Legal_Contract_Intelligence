@@ -1,5 +1,5 @@
 from langchain_community.vectorstores import Chroma
-from config.settings import TOP_K
+from vector_pipeline.config.settings import TOP_K
 import logging
 
 logger = logging.getLogger(__name__)
