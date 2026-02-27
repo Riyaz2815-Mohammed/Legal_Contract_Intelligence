@@ -2,9 +2,10 @@ import psycopg2
 import pandas as pd
 from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
-from langchain.schema import Document
+from langchain_core.documents import Document
 
-from config.settings import (
+
+from vector_pipeline.config.settings import (
     DATABASE_URL,
     EMBEDDING_MODEL,
     EMBEDDING_DEVICE,
@@ -26,20 +27,23 @@ def get_embedding_model():
 
 
 def fetch_legal_clauses() -> pd.DataFrame:
+    conn = None
     try:
         conn = psycopg2.connect(DATABASE_URL)
         df = pd.read_sql("""
             SELECT clause_id, clause, content, content_id, source,
                    page_number, document, document_id, created_at
-            FROM clause_table
+            FROM clauses
             WHERE source = 'legal'
         """, conn)
-        conn.close()
         logger.info(f"Fetched {len(df)} legal clauses from Supabase")
         return df
     except Exception as e:
         logger.error(f"Error fetching clauses: {e}")
         raise
+    finally:
+        if conn:
+            conn.close()
 
 
 def build_documents(df: pd.DataFrame) -> list[Document]:

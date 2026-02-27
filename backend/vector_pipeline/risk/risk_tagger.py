@@ -1,5 +1,5 @@
-from risk.risk_config import RISK_CONFIG, DEFAULT_RISK, RISK_PRIORITY
-from config.settings import SBERT_HIGH_RISK_THRESHOLD, SBERT_MEDIUM_RISK_THRESHOLD
+from vector_pipeline.risk.risk_config import RISK_CONFIG, DEFAULT_RISK, RISK_PRIORITY
+from vector_pipeline.config.settings import SBERT_HIGH_RISK_THRESHOLD, SBERT_MEDIUM_RISK_THRESHOLD
 import logging
 
 logger = logging.getLogger(__name__)

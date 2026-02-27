@@ -1,5 +1,5 @@
 from sentence_transformers import SentenceTransformer, util
-from config.settings import EMBEDDING_MODEL
+from vector_pipeline.config.settings import EMBEDDING_MODEL
 import logging
 
 logger = logging.getLogger(__name__)

@@ -20,7 +20,6 @@ from botocore.exceptions import ClientError
 from botocore.config import Config
 import psycopg2
 from psycopg2 import pool
-from embeddings.sbert_model import load_model
 
 app = FastAPI(title="LACCIS API", description="Legal Clause Classification Intelligence System")
 
@@ -565,28 +564,74 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
         # 1. Extract text (PDF, DOCX, TXT)
         extracted_text = extract_text_from_file(str(local_path))
 
-        # 2. Save .txt version to extracted_texts folder
-        base_name = Path(file_name).stem
-        txt_filename = base_name + ".txt"
-        json_filename = base_name + ".json"
+        # 2. Parse text blocks directly (without saving local temp files)
+        # Instead of parsing a text file on disk, we can pass a mocked list of lines 
+        # to a helper, or simply update `process_document` to handle raw text.
+        # But since `clause_engine.parse_text_file` expects a file path, we'll write a temp string block parser 
+        # or just reuse the logic from `parse_text_file` directly.
+        from extracter.clause_engine import extract_structural_id
+        
+        extracted_blocks = []
+        current_page = 1
+        current_text_lines = []
+        current_block_start_page = 1
 
-        extract_docs_dir = extracter_dir / "extracted_texts"
-        extract_docs_dir.mkdir(parents=True, exist_ok=True)
+        import re
+        lines = extracted_text.splitlines()
 
-        txt_path = extract_docs_dir / txt_filename
-        json_path = extract_docs_dir / json_filename
+        for line in lines:
+            line_stripped = line.strip()
 
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write(extracted_text)
-        print(f"[INFO] [Background] Saved extracted text to {txt_path}")
+            # Check for Page Header
+            page_match = re.match(r"^PAGE\s+(\d+)", line_stripped, re.IGNORECASE)
+            if page_match:
+                current_page = int(page_match.group(1))
+                continue
+
+            # Skip separator lines
+            if re.match(r"^-+$", line_stripped):
+                continue
+
+            if not line_stripped:
+                continue
+
+            # Check if line starts a new clause
+            is_new_clause = extract_structural_id(line_stripped) is not None
+
+            if is_new_clause:
+                # Save previous block if exists
+                if current_text_lines:
+                    full_text = " ".join(current_text_lines)
+                    extracted_blocks.append({
+                        "page_number": current_block_start_page,
+                        "raw_text": full_text
+                    })
+
+                # Start new block
+                current_text_lines = [line_stripped]
+                current_block_start_page = current_page
+            else:
+                # If no block started (e.g., preamble), start one
+                if not current_text_lines:
+                    current_block_start_page = current_page
+
+                # Append to current
+                current_text_lines.append(line_stripped)
+
+        # Flush last block
+        if current_text_lines:
+            full_text = " ".join(current_text_lines)
+            extracted_blocks.append({
+                "page_number": current_block_start_page,
+                "raw_text": full_text
+            })
 
         # 3. Classify — pass document type and source so every clause record is fully tagged
-        raw_blocks = parse_text_file(str(txt_path))
-        results = process_document(raw_blocks, document=document_type, source=source)
+        results = process_document(extracted_blocks, document=document_type, source=source)
 
         # (JSON storage was removed per user request, DB storage only)
         
-        # 4. Insert into clauses table
+        # 4. Insert into clauses table and run vector pipeline
         conn = None
         try:
             if db_pool:
@@ -619,9 +664,67 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                         )
                 conn.commit()
                 print(f"[SUCCESS] [Background] Saved {len(results)} clauses to database")
+                
+                # ------ NEW INTEGRATION: Vector Pipeline ------
+                if source == "legal":
+                    # For standard templates, refresh the ChromaDB so it includes the new clauses
+                    from vector_pipeline.embeddings.embed_store import run_embed_pipeline
+                    print(f"[INFO] [Background] Document '{file_name}' is a standard template. Updating ChromaDB...")
+                    run_embed_pipeline()
+                    print(f"[SUCCESS] [Background] ChromaDB updated with new standard template clauses.")
+                
+                elif source == "client" and document_id:
+                    # For client documents, process each clause against the ChromaDB standard templates
+                    from vector_pipeline.pipeline.full_pipeline import run_pipeline
+                    print(f"[INFO] [Background] Document '{file_name}' is a client document. Running vector review pipeline...")
+                    
+                    final_reviews = []
+                    for clause in results:
+                        client_text = clause.get("content", "")
+                        clause_type = clause.get("clause", "Unknown")
+                        
+                        # Only analyze clauses with meaningful text
+                        if len(client_text.strip()) > 10:
+                            # Run pipeline: retrieves top K similar standard clauses, scores them, tags risk, runs LLM if high risk
+                            pipeline_results = run_pipeline(query_text=client_text, clause_type=clause_type)
+                            
+                            # Grab the best match from the pipeline (sorted by similarity desc)
+                            best_match = pipeline_results[0] if pipeline_results else None
+                            
+                            review_entry = {
+                                "clause_id": clause.get("clause_id"),
+                                "clause": clause_type,
+                                "content": client_text,
+                                "page_number": clause.get("page_number", 1),
+                                "risk_analysis": best_match # Contains final_risk, template_content, sbert_similarity, llm_reasoning, etc.
+                            }
+                            final_reviews.append(review_entry)
+                        else:
+                            # Skip tiny lines/headers
+                            final_reviews.append({
+                                "clause_id": clause.get("clause_id"),
+                                "clause": clause_type,
+                                "content": client_text,
+                                "page_number": clause.get("page_number", 1),
+                                "risk_analysis": None
+                            })
+
+                    # Save the complete review JSON for the legal team's dashboard
+                    reviews_dir = DATA_DIR / "reviews"
+                    reviews_dir.mkdir(parents=True, exist_ok=True)
+                    review_path = reviews_dir / f"{document_id}.json"
+                    
+                    with open(review_path, "w", encoding="utf-8") as f:
+                        json.dump(final_reviews, f, indent=4)
+                        
+                    print(f"[SUCCESS] [Background] Vector review pipeline complete. Saved to {review_path}.")
+                # ----------------------------------------------
+                
         except Exception as db_err:
-            print(f"[ERROR] [Background] Failed to save clauses to database: {db_err}")
+            print(f"[ERROR] [Background] Failed to process vector pipeline or save clauses: {db_err}")
             if conn: conn.rollback()
+            import traceback
+            traceback.print_exc()
         finally:
             if conn: db_pool.putconn(conn)
 

@@ -1,9 +1,9 @@
-from embeddings.embed_store import get_embedding_model, load_vectorstore
-from retrieval.query import query_vectorstore
-from similarity.sbert_scorer import compute_similarity
-from risk.risk_tagger import tag_risk
-from llm.reasoning import run_llm_reasoning
-from config.settings import TOP_K
+from vector_pipeline.embeddings.embed_store import get_embedding_model, load_vectorstore
+from vector_pipeline.retrieval.query import query_vectorstore
+from vector_pipeline.similarity.sbert_scorer import compute_similarity
+from vector_pipeline.risk.risk_tagger import tag_risk
+from vector_pipeline.llm.reasoning import run_llm_reasoning
+from vector_pipeline.config.settings import TOP_K
 
 import logging
 logger = logging.getLogger(__name__)
@@ -25,18 +25,20 @@ def run_pipeline(query_text: str, clause_type: str = None, k: int = TOP_K) -> li
             sbert_score = compute_similarity(query_text, doc.page_content)
 
             # Risk tagging
+            # CRITICAL: We tag the risk of the CLIENT's clause (query_text), not the standard template (doc.page_content)
             risk_result = tag_risk(
-                content=doc.page_content,
+                content=query_text,
                 clause_type=doc.metadata.get("clause", ""),
                 sbert_score=sbert_score
             )
 
             item = {
-                "content": doc.page_content,
+                "client_content": query_text,
+                "template_content": doc.page_content,
                 "chroma_score": round(chroma_score, 4),
                 "sbert_similarity": sbert_score,
                 **risk_result,
-                **doc.metadata
+                "template_metadata": doc.metadata
             }
 
             # Auto LLM for high risk
