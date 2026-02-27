@@ -55,23 +55,37 @@
 
 .clause-grid {
     display: grid;
-    grid-template-columns: 1fr;
-    gap: 1.25rem;
+    grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+    gap: 1.75rem;
+    align-items: start;
 }
 
 .clause-card {
     background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 14px;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
-    padding: 1.5rem;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    border: 1px solid rgba(226, 232, 240, 0.8);
+    border-radius: 12px;
+    box-shadow: 0 4px 20px -2px rgba(15, 23, 42, 0.05);
+    padding: 1.75rem;
+    transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+    position: relative;
+    overflow: hidden;
+}
+
+.clause-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 3px;
+    height: 100%;
+    background: linear-gradient(135deg, #2563EB, #8b5cf6);
+    opacity: 0.9;
 }
 
 .clause-card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
-    border-color: #BFDBFE;
+    transform: translateY(-4px);
+    box-shadow: 0 12px 30px -4px rgba(15, 23, 42, 0.1), 0 4px 12px -2px rgba(15, 23, 42, 0.05);
+    border-color: rgba(191, 219, 254, 0.8);
 }
 
 .clause-card-header {
@@ -90,29 +104,31 @@
 }
 
 .clause-type-badge {
-    padding: 0.25rem 0.75rem;
-    border-radius: 9999px;
-    font-size: 0.6875rem;
-    font-weight: 700;
+    padding: 0.35rem 0.85rem;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.06em;
 }
 
 .clause-content {
-    color: #475569;
-    line-height: 1.7;
-    font-size: 0.9375rem;
+    color: #334155;
+    line-height: 1.65;
+    font-size: 0.95rem;
+    font-weight: 400;
 }
 
 .page-indicator {
-    font-size: 0.75rem;
-    color: #94a3b8;
-    margin-top: 1rem;
+    font-size: 0.8rem;
+    color: #64748b;
+    margin-top: 1.25rem;
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    border-top: 1px solid #f1f5f9;
-    padding-top: 0.75rem;
+    gap: 0.35rem;
+    border-top: 1px dashed #e2e8f0;
+    padding-top: 1rem;
+    font-weight: 500;
 }
 
 .btn-back {

@@ -22,7 +22,8 @@ const DocumentAnalysis = ({ user, onLogout }) => {
                 if (response.ok) {
                     setData(result);
                 } else {
-                    setError(result.detail || 'Failed to load analysis');
+                    const errorDetail = result.detail;
+                    setError(typeof errorDetail === 'string' ? errorDetail : JSON.stringify(errorDetail || 'Failed to load analysis'));
                 }
             } catch (err) {
                 console.error('Fetch error:', err);

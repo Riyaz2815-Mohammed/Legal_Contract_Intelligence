@@ -37,19 +37,30 @@ function Dashboard({ user, onLogout }) {
 
             if (clientsRes.ok && docsRes.ok) {
                 const documents = docsData.documents || [];
+                let sumTotalDocs = 0;
+                let sumPendingReviews = 0;
+
                 const clientList = clientsData.clients.map(client => {
-                    const clientDocs = documents.filter(d => d.user_id === client.id);
+                    const clientDocs = documents.filter(d =>
+                        d.user_id === client.id || (d.shared_with && d.shared_with.includes(client.id))
+                    );
+                    const pendingCount = clientDocs.filter(d => d.status === 'pending' || d.status === 'uploaded').length;
+
+                    sumTotalDocs += clientDocs.length;
+                    sumPendingReviews += pendingCount;
+
                     return {
                         ...client,
                         totalDocs: clientDocs.length,
-                        pendingDocs: clientDocs.filter(d => d.status === 'pending' || d.status === 'uploaded').length
+                        pendingDocs: pendingCount
                     };
                 });
+
                 setClients(clientList);
                 setStats({
-                    totalDocs: documents.length,
+                    totalDocs: sumTotalDocs,
                     totalClients: clientList.length,
-                    pendingReviews: documents.filter(d => d.status === 'pending' || d.status === 'uploaded').length
+                    pendingReviews: sumPendingReviews
                 });
             }
         } catch (error) {

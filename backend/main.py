@@ -580,8 +580,10 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
         raw_blocks = parse_text_file(str(txt_path))
         results = process_document(raw_blocks, document=document_type, source=source)
 
-        with open(json_path, "w", encoding="utf-8") as f:
+        temp_json_path = json_path.with_suffix('.json.tmp')
+        with open(temp_json_path, "w", encoding="utf-8") as f:
             json.dump(results, f, indent=2, ensure_ascii=False)
+        temp_json_path.replace(json_path)
 
         print(f"[SUCCESS] [Background] Classification complete: {len(results)} clauses saved to {json_path}")
 
@@ -706,77 +708,49 @@ async def upload_document(
 def get_document_analysis(document_id: str, current_user: dict = Depends(verify_token)):
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database not connected")
+    
     conn = None
     try:
         conn = db_pool.getconn()
         with conn.cursor() as cur:
-            cur.execute("SELECT s3_key FROM documents WHERE id = %s", (document_id,))
-            doc_s3_key = cur.fetchone()
-            if not doc_s3_key:
-                raise HTTPException(status_code=404, detail="Document not found")
-            s3_key = doc_s3_key[0]
+            cur.execute("SELECT id, filename, document_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, file_path, s3_url, s3_key FROM documents WHERE id = %s", (document_id,))
+            row = cur.fetchone()
+            
+            if not row:
+                raise HTTPException(status_code=404, detail=f"Document {document_id} not found")
+                
+            doc = {
+                "id": row[0], "filename": row[1], "document_type": row[2], "user_id": row[3],
+                "user_email": row[4], "user_role": row[5], "size": row[6], "status": row[7],
+                "shared_with": row[8], "uploaded_at": row[9].isoformat() if row[9] else None,
+                "file_path": row[10], "s3_url": row[11], "s3_key": row[12]
+            }
+            s3_key = doc["s3_key"]
+            
+            if not s3_key:
+                raise HTTPException(status_code=400, detail="Analysis not available, missing S3 key")
+            
+            json_filename = str(Path(s3_key).with_suffix('.json'))
+            analysis_path = Path(__file__).parent.parent / "extracter" / "extracted_texts" / json_filename
+            
+            if not analysis_path.exists():
+                return {"document": doc, "clauses": [], "status": "processing"}
+                
+            try:
+                with open(analysis_path, "r", encoding="utf-8") as f:
+                    clauses_data = json.load(f)
+                return {"document": doc, "clauses": clauses_data, "status": "complete"}
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Error reading analysis file: {str(e)}")
+                
+    except HTTPException:
+        # Re-raise HTTP exceptions directly
+        raise
     except Exception as e:
         print(f"[ERROR] Database analysis error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if conn: db_pool.putconn(conn)
-        
-    if not s3_key:
-        raise HTTPException(status_code=400, detail="Analysis not available")
-    
-    json_filename = str(Path(s3_key).with_suffix('.json'))
-    analysis_path = Path(__file__).parent.parent / "extracter" / "extracted_texts" / json_filename
-    
-    if not analysis_path.exists():
-        # Fetch full document details for the response if analysis is pending
-        conn = None
-        try:
-            conn = db_pool.getconn()
-            with conn.cursor() as cur:
-                cur.execute("SELECT id, filename, document_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, file_path, s3_url, s3_key FROM documents WHERE id = %s", (document_id,))
-                row = cur.fetchone()
-                if row:
-                    doc = {
-                        "id": row[0], "filename": row[1], "document_type": row[2], "user_id": row[3],
-                        "user_email": row[4], "user_role": row[5], "size": row[6], "status": row[7],
-                        "shared_with": row[8], "uploaded_at": row[9].isoformat() if row[9] else None,
-                        "file_path": row[10], "s3_url": row[11], "s3_key": row[12]
-                    }
-                    return {"document": doc, "clauses": [], "status": "processing"}
-                else:
-                    raise HTTPException(status_code=404, detail="Document not found")
-        except Exception as e:
-            print(f"[ERROR] Database error fetching document for analysis status: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-        finally:
-            if conn: db_pool.putconn(conn)
-        
-    try:
-        # Fetch full document details for the response if analysis is complete
-        conn = None
-        try:
-            conn = db_pool.getconn()
-            with conn.cursor() as cur:
-                cur.execute("SELECT id, filename, document_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, file_path, s3_url, s3_key FROM documents WHERE id = %s", (document_id,))
-                row = cur.fetchone()
-                if row:
-                    doc = {
-                        "id": row[0], "filename": row[1], "document_type": row[2], "user_id": row[3],
-                        "user_email": row[4], "user_role": row[5], "size": row[6], "status": row[7],
-                        "shared_with": row[8], "uploaded_at": row[9].isoformat() if row[9] else None,
-                        "file_path": row[10], "s3_url": row[11], "s3_key": row[12]
-                    }
-                    with open(analysis_path, "r", encoding="utf-8") as f:
-                        return {"document": doc, "clauses": json.load(f), "status": "complete"}
-                else:
-                    raise HTTPException(status_code=404, detail="Document not found")
-        except Exception as e:
-            print(f"[ERROR] Database error fetching document for analysis result: {e}")
-            raise HTTPException(status_code=500, detail=str(e))
-        finally:
-            if conn: db_pool.putconn(conn)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error reading analysis: {str(e)}")
 
 
 @app.get("/api/documents/download/{document_id}")
@@ -933,11 +907,11 @@ def list_documents(current_user: dict = Depends(verify_token)):
     try:
         with conn.cursor() as cur:
             if current_user["role"] in ("admin", "legal_team"):
-                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key FROM documents ORDER BY uploaded_at DESC")
+                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with FROM documents ORDER BY uploaded_at DESC")
             else:
-                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key FROM documents WHERE user_id = %s ORDER BY uploaded_at DESC", (current_user["user_id"],))
+                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with FROM documents WHERE user_id = %s OR %s = ANY(shared_with) ORDER BY uploaded_at DESC", (current_user["user_id"], current_user["user_id"]))
             rows = cur.fetchall()
-            return {"documents": [{"id": r[0], "user_id": r[1], "filename": r[2], "document_type": r[3], "status": r[4], "uploaded_at": r[5].isoformat() if r[5] else None, "s3_key": r[6]} for r in rows]}
+            return {"documents": [{"id": r[0], "user_id": r[1], "filename": r[2], "document_type": r[3], "status": r[4], "uploaded_at": r[5].isoformat() if r[5] else None, "s3_key": r[6], "size": r[7], "shared_with": r[8]} for r in rows]}
     except Exception as e:
         print(f"[ERROR] list_documents error: {e}")
         raise HTTPException(status_code=500, detail="Database error")
@@ -1303,7 +1277,23 @@ def ask_llm_about_clause(
         return {"answer": answer, "content_id": req.content_id}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
-
+@app.get("/api/legal/list")
+def list_legal_team(current_user: dict = Depends(verify_token)):
+    """Return all members explicitly marked as legal_team or admin for the client to chat with."""
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, name, email FROM users WHERE role IN ('legal_team', 'admin')")
+            rows = cur.fetchall()
+            return {"members": [{"id": r[0], "name": r[1], "email": r[2], "role": "legal_team"} for r in rows]}
+    except Exception as e:
+        print(f"[ERROR] Error listing legal team: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
 
 if __name__ == "__main__":
     import uvicorn
