@@ -53,10 +53,10 @@ EMAILJS_PUBLIC_KEY = os.getenv("EMAILJS_PUBLIC_KEY")
 EMAILJS_PRIVATE_KEY = os.getenv("EMAILJS_PRIVATE_KEY")
 
 # AWS Configuration
-AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
-AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY")
-AWS_REGION = os.getenv("REGION")
-BUCKET_NAME = os.getenv("BUCKET_NAME")
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY", "").strip(' "')
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_KEY", "").strip(' "')
+AWS_REGION = os.getenv("REGION", "").strip(' "')
+BUCKET_NAME = os.getenv("BUCKET_NAME", "").strip(' "')
 
 # Database Configuration
 DATABASE_URL = os.getenv("DATABASE_URL")
@@ -625,11 +625,10 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
         finally:
             if conn: db_pool.putconn(conn)
 
-        print(f"[SUCCESS] [Background] Classification complete: {len(results)} clauses saved to {json_path}")
-
+        print(f"[SUCCESS] [Background] Classification complete for {file_name}: {len(results)} clauses saved.")
     except Exception as e:
         import traceback
-        print(f"[ERROR] [Background] Extraction failed for {file_name}")
+        print(f"[ERROR] [Background] Extraction failed for {file_name}: {str(e)}")
         print(traceback.format_exc())
 
 
@@ -684,7 +683,7 @@ async def upload_document(
         s3_url = None
     
     # Determine status based on document type
-    status = "pending" if document_type == "NDA" else "uploaded"
+    status = "pending" if document_type.startswith("NDA") else "uploaded"
     doc_uuid = f"doc-{uuid.uuid4().hex[:8]}"
     
     new_doc = {
@@ -697,7 +696,7 @@ async def upload_document(
         "size": len(content),
         "status": status,
         "shared_with": shared_with if shared_with else [],
-        "uploaded_at": datetime.now().isoformat(),
+        "uploaded_at": datetime.now(),
         "file_path": str(file_path),
         "s3_url": s3_url,
         "s3_key": file_name
@@ -715,7 +714,7 @@ async def upload_document(
                 INSERT INTO documents (id, filename, document_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, file_path, s3_url, s3_key)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (new_doc["id"], new_doc["filename"], new_doc["document_type"], new_doc["user_id"], new_doc["user_email"], new_doc["user_role"], new_doc["size"], new_doc["status"], new_doc["shared_with"], new_doc["uploaded_at"], new_doc["file_path"], new_doc["s3_url"], new_doc["s3_key"])
+                (new_doc["id"], new_doc["filename"], new_doc["document_type"], new_doc["user_id"], new_doc["user_email"], new_doc["user_role"], new_doc["size"], new_doc["status"], json.dumps(new_doc["shared_with"]), new_doc["uploaded_at"], new_doc["file_path"], new_doc["s3_url"], new_doc["s3_key"])
             )
         conn.commit()
     except Exception as e:
@@ -733,10 +732,14 @@ async def upload_document(
         details=f"Document: {file.filename} ({document_type})"
     )
     
-    # Trigger automated extraction in background
+    # Trigger automated extraction in background (Skip for Redlined)
     source = "client" if current_user["role"] == "client" else "legal"
     if s3_url:
-        background_tasks.add_task(trigger_extraction, file_name, document_type, source)
+        is_redlined = "Redlined" in document_type or "(Redlined)" in document_type
+        if is_redlined:
+            print(f"📄 [SKIP] Extraction skipped for redlined document: {file_name}")
+        else:
+            background_tasks.add_task(trigger_extraction, file_name, document_type, source)
     
     return {
         "message": "Document uploaded and queued for extraction",
@@ -1125,23 +1128,62 @@ def download_shared_contract(contract_id: str, current_user: dict = Depends(veri
 
 @app.post("/api/templates/upload")
 async def upload_template(background_tasks: BackgroundTasks, file: UploadFile = File(...), template_type: str = Form(...), current_user: dict = Depends(verify_token)):
-    if current_user["role"] not in ["admin", "legal_team"]: raise HTTPException(status_code=403)
+    if current_user["role"] not in ["admin", "legal_team"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
     content = await file.read()
     file_name = f"template_{uuid.uuid4().hex[:8]}_{file.filename}"
     file_path = UPLOADS_DIR / file_name
-    with open(file_path, "wb") as f: f.write(content)
-    try: s3_client.put_object(Bucket=BUCKET_NAME, Key=file_name, Body=content)
-    except: pass
-    tmpl_id = f"tmpl-{uuid.uuid4().hex[:8]}"
-    conn = db_pool.getconn()
+    
+    # Save locally first
+    with open(file_path, "wb") as f:
+        f.write(content)
+    
+    # Upload to S3
+    s3_url = None
     try:
+        s3_client.put_object(Bucket=BUCKET_NAME, Key=file_name, Body=content)
+        s3_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{file_name}"
+        print(f"[S3] Template {file_name} uploaded successfully")
+    except Exception as e:
+        print(f"[ERROR] [S3] Template upload failed: {e}")
+    
+    tmpl_id = f"tmpl-{uuid.uuid4().hex[:8]}"
+    conn = None
+    try:
+        if not db_pool:
+            raise HTTPException(status_code=500, detail="Database not connected")
+        
+        conn = db_pool.getconn()
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO documents (id, filename, document_type, template_type, user_id, user_email, user_role, uploaded_at, s3_key, file_path) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (tmpl_id, file.filename, 'template', template_type, current_user["user_id"], current_user.get("email", ""), current_user.get("role", "admin"), datetime.now(), file_name, str(file_path)))
+            # Metadata consistent with documents table
+            cur.execute(
+                """
+                INSERT INTO documents (id, filename, document_type, template_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, s3_key, s3_url, file_path)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    tmpl_id, file.filename, 'template', template_type, 
+                    current_user["user_id"], current_user.get("email", ""), current_user.get("role", "admin"),
+                    len(content), 'uploaded', json.dumps([]), datetime.now(),
+                    file_name, s3_url, str(file_path)
+                )
+            )
             conn.commit()
+            
+            # Record activity
+            record_activity(current_user["user_id"], "admin", "Uploaded standard template", f"Type: {template_type}")
+            
+            # Trigger extraction in background
             background_tasks.add_task(trigger_extraction, file_name, template_type, "legal")
-            return {"message": "Uploaded", "id": tmpl_id}
-    finally: db_pool.putconn(conn)
+            
+            return {"message": "Template uploaded and processing", "id": tmpl_id}
+    except Exception as e:
+        print(f"[ERROR] Database template upload error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 @app.get("/api/templates/analysis/{template_id}")
