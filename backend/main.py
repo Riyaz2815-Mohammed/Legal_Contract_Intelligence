@@ -733,7 +733,14 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
         import traceback
         print(f"[ERROR] [Background] Extraction failed for {file_name}: {str(e)}")
         print(traceback.format_exc())
-
+    finally:
+        # Clean up the original uploaded file from local storage to ensure privacy and save space
+        try:
+            if 'local_path' in locals() and local_path.exists():
+                local_path.unlink()
+                print(f"[INFO] [Background] Cleaned up local file: {local_path}")
+        except Exception as cleanup_err:
+            print(f"[WARNING] [Background] Could not delete local file {local_path}: {cleanup_err}")
 
 @app.post("/api/documents/upload")
 async def upload_document(
