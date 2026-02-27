@@ -39,60 +39,114 @@ def extract_structural_id(text: str) -> Optional[str]:
 def classify_clause(text: str) -> str:
     """
     Classifies the clause text into a standardized type using rules, headers, and keywords.
+    Supports ~70 specific clause types.
     """
     text_clean = text.strip()
     text_lower = text_clean.lower()
     
-    # Priority 1: Check if the text starts with a specific section header
+    # Priority 1: Check if the text starts with a specific section header (prefix matching)
     header_logic = {
-        "Indemnity": [r"indemni"],
-        "Limitation of Liability": [r"limit.*liability", r"liability.*limit"],
-        "Confidentiality": [r"confidenti"],
-        "Termination": [r"terminat"],
-        "Payment Terms": [r"payment", r"fees", r"billing"],
-        "SLA": [r"service\s+level", r"uptime"],
-        "Governing Law": [r"governing\s+law", r"applicable\s+law"],
-        "Intellectual Property": [r"intellectual\s+property", r"ip\s+rights", r"ownership"],
-        "Warranty": [r"warrant"],
-        "Data Protection": [r"data\s+protection", r"privacy", r"gdpr"],
-        "Force Majeure": [r"force\s+majeure"],
-        "Non-Compete": [r"non-compete", r"non\s+compete"],
-        "Insurance": [r"insurance"],
-        "Notices": [r"notices"],
-        "Assignment": [r"assignment"],
+        "Definitions": [r"definitions", r"defined terms"],
+        "Purpose": [r"purpose", r"background", r"recitals"],
+        "Purpose of the Agreement": [r"purpose of the agreement", r"objective"],
+        "Scope of Services": [r"scope of services", r"service scope"],
+        "Scope of Referral Services": [r"scope of referral services"],
+        "Structure of Agreement (MSA–SOW Linkage)": [r"structure of agreement", r"msa–sow linkage", r"linkage between msa and sow"],
+        "Appointment of Referrer": [r"appointment of referrer", r"designation of referrer"],
+        "Referrer’s Responsibilities": [r"referrer.*responsibilit", r"responsibilities of referrer"],
+        "Solution Provider’s Responsibilities": [r"solution provider.*responsibilit", r"responsibilities of solution provider"],
+        "Roles and Responsibilities": [r"roles and responsibilit", r"obligations of the parties"],
+        "Deliverables": [r"deliverables", r"work product deliverables"],
+        "Project Timeline and Milestones": [r"project timeline", r"milestones", r"schedule"],
+        "Assumptions and Dependencies": [r"assumptions and dependencies"],
+        "Acceptance Criteria": [r"acceptance criteria", r"testing and acceptance"],
+        "Service Levels (SLA)": [r"service level", r"sla", r"uptime", r"availability"],
+        "Change Management Process": [r"change management", r"change request", r"change control"],
+        "Fees and Payment Terms": [r"fees and payment", r"payment terms", r"compensation"],
+        "Referral Fee": [r"referral fee", r"referral commission"],
+        "Commission Structure": [r"commission structure", r"payment of commission"],
+        "Payment Schedule": [r"payment schedule", r"milestone payments"],
+        "Invoicing Terms": [r"invoicing", r"invoice terms"],
+        "Taxes and Tax Responsibility": [r"taxes", r"tax responsibility", r"withholding"],
+        "Expenses": [r"expenses", r"reimbursement of expenses"],
+        "No Expense Reimbursement": [r"no expense reimbursement"],
+        "Confidentiality": [r"confidentiality", r"non-disclosure"],
+        "Definition of Confidential Information": [r"definition of confidential information"],
+        "Exclusions from Confidential Information": [r"exclusions from confidential information", r"exceptions to confidentiality"],
+        "Permitted Use of Confidential Information": [r"permitted use of confidential information"],
+        "Non-Disclosure and Non-Use Obligations": [r"non-disclosure and non-use", r"confidentiality obligations"],
+        "Return or Destruction of Confidential Information": [r"return or destruction"],
+        "Confidentiality and IP Protection": [r"confidentiality and ip protection"],
+        "Intellectual Property Rights": [r"intellectual property rights", r"ip rights", r"proprietary rights"],
+        "Ownership of Deliverables": [r"ownership of deliverables", r"title to deliverables"],
+        "No License Granted": [r"no license granted", r"no transfer of rights"],
+        "Data Protection and Security": [r"data protection", r"data security", r"gdpr", r"privacy"],
+        "Compliance with Laws": [r"compliance with laws", r"regulatory compliance"],
+        "Independent Contractor Relationship": [r"independent contractor", r"relationship of the parties"],
+        "Non-Solicitation": [r"non-solicitation", r"non solicitation"],
+        "Non-Circumvention": [r"non-circumvention", r"non circumvention"],
+        "Exclusivity / Non-Exclusivity": [r"exclusivity", r"non-exclusivity"],
+        "Representations and Warranties": [r"representations and warranties"],
+        "Warranty of Services": [r"warranty of services", r"service warranty"],
+        "Indemnification": [r"indemnification", r"indemnity"],
+        "Insurance": [r"insurance", r"liability insurance"],
+        "Limitation of Liability": [r"limitation of liability", r"liability limit"],
+        "Risk Allocation": [r"risk allocation", r"allocation of risk"],
+        "Remedies for Breach": [r"remedies for breach", r"liquidated damages"],
+        "Injunctive Relief": [r"injunctive relief", r"equitable relief"],
+        "Channel Conflict Resolution": [r"channel conflict"],
+        "Force Majeure": [r"force majeure", r"act of god"],
+        "Term": [r"term", r"duration of agreement"],
+        "Termination": [r"termination"],
+        "Termination for Convenience": [r"termination for convenience", r"voluntary termination"],
+        "Termination for Cause": [r"termination for cause", r"default termination"],
+        "Effect of Termination": [r"effect of termination", r"consequences of termination"],
+        "Transition Assistance": [r"transition assistance", r"exit services"],
+        "Survival": [r"survival"],
+        "Assignment": [r"assignment", r"transfer of agreement"],
+        "Subcontracting": [r"subcontracting"],
+        "Amendments": [r"amendments", r"modifications"],
+        "Notices": [r"notices", r"communications"],
+        "Severability": [r"severability"],
+        "Waiver": [r"waiver", r"no waiver"],
+        "Entire Agreement": [r"entire agreement", r"integration", r"merger"],
+        "General": [r"general", r"miscellaneous"],
+        "Governing Law": [r"governing law", r"applicable law"],
+        "Jurisdiction and Dispute Resolution": [r"jurisdiction", r"dispute resolution", r"arbitration", r"mediation"],
     }
 
-    # Check first 50 chars for headers
-    prefix = text_lower[:50]
+    # Check first 70 chars for headers
+    prefix = text_lower[:70]
     for category, patterns in header_logic.items():
         for pat in patterns:
             if re.search(pat, prefix):
                 return category
 
-    # Priority 2: Standard Rule-based classification
+    # Priority 2: Keyword Scoring
     if not nlp:
         doc = None
     else:
         doc = nlp(text_lower)
 
-    text_lower = text.lower()
-
     rules = {
-        "Indemnity": ["indemnify", "indemnification", "hold harmless", "defend and hold"],
-        "Limitation of Liability": ["limitation of liability", "cap on liability", "exclude liability", "consequential damages", "indirect damages"],
-        "Confidentiality": ["confidential", "non-disclosure", "proprietary information", "trade secret"],
-        "Termination": ["terminate", "termination", "cancellation", "term and termination", "expiry"],
-        "Payment Terms": ["payment", "invoice", "fees", "billing", "due date", "remit"],
-        "SLA": ["service level", "sla", "uptime", "availability", "response time"],
-        "Governing Law": ["governing law", "choice of law", "jurisdiction", "laws of", "legal proceedings"],
-        "Force Majeure": ["force majeure", "act of god", "unforeseen circumstances", "beyond control"],
-        "Intellectual Property": ["intellectual property", "ip rights", "copyright", "trademark", "ownership", "work for hire"],
-        "Warranty": ["warranty", "warranties", "represent and warrant", "disclaimer of warranty"],
-        "Data Protection": ["data protection", "gdpr", "personal data", "privacy", "data subject"],
+        "Indemnification": ["indemnify", "indemnification", "hold harmless"],
+        "Limitation of Liability": ["limitation of liability", "cap on liability", "consequential damages"],
+        "Confidentiality": ["confidential", "non-disclosure", "proprietary information"],
+        "Termination": ["terminate", "termination", "cancellation"],
+        "Payment Terms": ["payment", "invoice", "fees"],
+        "Service Levels (SLA)": ["service level", "sla", "uptime"],
+        "Governing Law": ["governing law", "jurisdiction", "laws of"],
+        "Intellectual Property Rights": ["intellectual property", "ip rights", "copyright", "trademark"],
+        "Deliverables": ["deliverables", "work product"],
+        "Data Protection and Security": ["data protection", "gdpr", "privacy"],
+        "Force Majeure": ["force majeure", "act of god"],
+        "Assignment": ["assignment", "assignability"],
+        "Notices": ["notices", "written notice"],
+        "Severability": ["severability", "invalidity"],
+        "Entire Agreement": ["entire agreement", "supersedes"],
     }
 
     scores = {category: 0 for category in rules}
-
     tokens = [token.lemma_ for token in doc] if doc else text_lower.split()
     token_text = " ".join(tokens)
 
@@ -102,7 +156,6 @@ def classify_clause(text: str) -> str:
                 scores[category] += 1
 
     best_match = max(scores, key=scores.get)
-
     if scores[best_match] > 0:
         return best_match
 

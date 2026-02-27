@@ -6,10 +6,11 @@ const API_URL = 'http://localhost:8000';
 function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
     const [files, setFiles] = useState([]);
     const [dragOver, setDragOver] = useState(false);
-    const [documentType, setDocumentType] = useState(externalDocumentType || '');
-    const [step, setStep] = useState(externalDocumentType ? 2 : 1);
+    const [documentType, setDocumentType] = useState('');
+    const [step, setStep] = useState(1);
     const [error, setError] = useState('');
 
+    // Set the document type as "Type (Redlined)" if they clicked Upload Redlined
     const handleStep1Complete = () => {
         if (!documentType) {
             setError('Please select a document type first');
@@ -48,7 +49,7 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
             size: file.size,
             progress: 0,
             status: 'uploading',
-            documentType: documentType
+            documentType: externalDocumentType === 'Redlined' ? `${documentType} (Redlined)` : documentType
         }));
 
         setFiles(prev => [...prev, ...newFiles]);
@@ -164,14 +165,12 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                             <option value="MSA">MSA (Master Service Agreement)</option>
                             <option value="SOW">SOW (Statement of Work)</option>
                             <option value="RA">RA (Registration Agreement)</option>
-                            <option value="NA">NA (Not Specified / Other)</option>
                         </select>
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '1rem' }}>
                             {documentType === 'NDA' && '✨ Automated extraction and classification will be performed for NDAs.'}
                             {documentType === 'RA' && 'Registration Agreement - Document storage.'}
                             {documentType === 'MSA' && 'Master Service Agreement - Major legal contract.'}
                             {documentType === 'SOW' && 'Statement of Work - Project details and deliverables.'}
-                            {documentType === 'NA' && 'Other miscellaneous legal documents.'}
                         </p>
                         <button
                             className="btn btn-primary"
@@ -191,14 +190,12 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                         <h4 style={{ margin: 0 }}>
                             Step 2: Upload
                             <span style={{ color: getDocumentTypeColor(documentType), marginLeft: '0.5rem' }}>
-                                {documentType}
+                                {externalDocumentType === 'Redlined' ? `${documentType} (Redlined)` : documentType}
                             </span>
                         </h4>
-                        {!externalDocumentType && (
-                            <button className="btn-text" onClick={() => setStep(1)} style={{ color: 'var(--primary)', fontWeight: 600 }}>
-                                Change Type
-                            </button>
-                        )}
+                        <button className="btn-text" onClick={() => setStep(1)} style={{ color: 'var(--primary)', fontWeight: 600 }}>
+                            Change Type
+                        </button>
                     </div>
 
                     <div
@@ -226,56 +223,61 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                         </button>
                     </div>
                 </div>
-            )}
+            )
+            }
 
-            {error && (
-                <div className="alert alert-error" style={{ marginTop: '1rem' }}>
-                    <span>⚠</span>
-                    <span>{error}</span>
-                </div>
-            )}
+            {
+                error && (
+                    <div className="alert alert-error" style={{ marginTop: '1rem' }}>
+                        <span>⚠</span>
+                        <span>{error}</span>
+                    </div>
+                )
+            }
 
-            {files.length > 0 && (
-                <div className="file-list">
-                    {files.map((fileObj, index) => (
-                        <div key={index} className="file-item">
-                            <div className="file-info">
-                                <span>📄</span>
-                                <div>
-                                    <div style={{ fontWeight: 600 }}>{fileObj.name}</div>
-                                    <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-                                        {formatFileSize(fileObj.size)} •
-                                        <span style={{
-                                            color: getDocumentTypeColor(fileObj.documentType),
-                                            marginLeft: '0.5rem',
-                                            fontWeight: 600
-                                        }}>
-                                            {fileObj.documentType}
-                                        </span>
-                                    </div>
-                                    {fileObj.error && (
-                                        <div style={{ fontSize: '0.75rem', color: 'var(--danger)', marginTop: '0.25rem' }}>
-                                            {fileObj.error}
+            {
+                files.length > 0 && (
+                    <div className="file-list">
+                        {files.map((fileObj, index) => (
+                            <div key={index} className="file-item">
+                                <div className="file-info">
+                                    <span>📄</span>
+                                    <div>
+                                        <div style={{ fontWeight: 600 }}>{fileObj.name}</div>
+                                        <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>
+                                            {formatFileSize(fileObj.size)} •
+                                            <span style={{
+                                                color: getDocumentTypeColor(fileObj.documentType),
+                                                marginLeft: '0.5rem',
+                                                fontWeight: 600
+                                            }}>
+                                                {fileObj.documentType}
+                                            </span>
                                         </div>
-                                    )}
+                                        {fileObj.error && (
+                                            <div style={{ fontSize: '0.75rem', color: 'var(--danger)', marginTop: '0.25rem' }}>
+                                                {fileObj.error}
+                                            </div>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                            <div style={{ flex: 1, margin: '0 1rem' }}>
-                                <div className="progress-bar">
-                                    <div
-                                        className="progress-fill"
-                                        style={{ width: `${fileObj.progress}%` }}
-                                    ></div>
+                                <div style={{ flex: 1, margin: '0 1rem' }}>
+                                    <div className="progress-bar">
+                                        <div
+                                            className="progress-fill"
+                                            style={{ width: `${fileObj.progress}%` }}
+                                        ></div>
+                                    </div>
                                 </div>
+                                <span className={`badge badge-${fileObj.status === 'success' ? 'success' : fileObj.status === 'error' ? 'danger' : 'pending'}`}>
+                                    {fileObj.status === 'success' ? 'Uploaded' : fileObj.status === 'error' ? 'Failed' : 'Uploading...'}
+                                </span>
                             </div>
-                            <span className={`badge badge-${fileObj.status === 'success' ? 'success' : fileObj.status === 'error' ? 'danger' : 'pending'}`}>
-                                {fileObj.status === 'success' ? 'Uploaded' : fileObj.status === 'error' ? 'Failed' : 'Uploading...'}
-                            </span>
-                        </div>
-                    ))}
-                </div>
-            )}
-        </div>
+                        ))}
+                    </div>
+                )
+            }
+        </div >
     );
 }
 
