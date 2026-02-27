@@ -42,7 +42,7 @@ function Dashboard({ user, onLogout }) {
 
                 const clientList = clientsData.clients.map(client => {
                     const clientDocs = documents.filter(d =>
-                        d.user_id === client.id || (d.shared_with && d.shared_with.includes(client.id))
+                        d.user_id === client.id || (Array.isArray(d.shared_with) && d.shared_with.includes(client.id))
                     );
                     const pendingCount = clientDocs.filter(d => d.status === 'pending' || d.status === 'uploaded').length;
 
