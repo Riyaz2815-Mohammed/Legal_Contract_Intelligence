@@ -9,14 +9,14 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-def run_pipeline(query_text: str, clause_type: str = None, k: int = TOP_K) -> list[dict]:
+def run_pipeline(query_text: str, clause_type: str = None, document_type: str = None, k: int = TOP_K) -> list[dict]:
     try:
         # Load models and vectorstore
         embedding_model = get_embedding_model()
         vectorstore = load_vectorstore(embedding_model)
 
-        # Retrieve from ChromaDB
-        results = query_vectorstore(vectorstore, query_text, clause_type, k)
+        # Retrieve from ChromaDB filtered by both clause type AND document type (e.g. MSA)
+        results = query_vectorstore(vectorstore, query_text, clause_type, document_type, k)
 
         final = []
         for doc, chroma_score in results:
@@ -43,8 +43,12 @@ def run_pipeline(query_text: str, clause_type: str = None, k: int = TOP_K) -> li
 
             # Auto LLM for high risk
             if item["needs_llm"]:
-                logger.warning(f"🔴 High risk clause detected: {item.get('clause')} — triggering LLM")
-                item["llm_reasoning"] = run_llm_reasoning(item)
+                try:
+                    logger.warning(f"🔴 High risk clause detected: {item.get('clause')} — triggering LLM")
+                    item["llm_reasoning"] = run_llm_reasoning(item)
+                except Exception as llm_err:
+                    logger.error(f"🔴 LLM Reasoning failed for {item.get('clause')}: {llm_err}")
+                    item["llm_reasoning"] = f"LLM Analysis failed: {str(llm_err)}"
             else:
                 item["llm_reasoning"] = None
 

@@ -8,8 +8,11 @@ import json
 
 app = Flask(__name__)
 
-# Load env from backend dir
-load_dotenv(os.path.join(os.path.dirname(__file__), '..', 'backend', '.env'))
+# Load env from backend dir absolutely
+from pathlib import Path
+backend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'backend')
+env_path = os.path.join(backend_dir, '.env')
+load_dotenv(env_path)
 
 # AWS Configuration
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY")
@@ -126,17 +129,24 @@ def extract_text_from_file(local_path: str) -> str:
                     extracted_text += "-" * 20 + "\n"
                     extracted_text += page_text + "\n\n"
         
-        # heuristic: if even one page is missing text, treat it as a potential mixed/scanned doc
+        # heuristic: only fall back to OCR if the document appears COMPLETELY scanned 
+        # (meaning pdfplumber could extract almost zero text across all pages)
         is_scanned = False
-        if total_pages > 0:
-            # If any page is "empty" but the document has pages, we might need OCR
-            # Or if the overall text content is extremely low for the page count
-            if pages_with_text < total_pages or len(text_content.strip()) < (total_pages * 50):
-                is_scanned = True
-        
+        if total_pages > 0 and pages_with_text == 0:
+            is_scanned = True
+        elif total_pages > 0 and len(text_content.strip()) < 50:
+            is_scanned = True
+            
         if is_scanned:
-            print(f"⚠️ [PDF] Mixed/Scanned content detected ({pages_with_text}/{total_pages} pages have text). Falling back to Mistral OCR for full accuracy...")
-            return mistral_ocr(local_path, is_pdf=True)
+            print(f"⚠️ [PDF] Document appears fully scanned ({pages_with_text} text pages found). Attempting OCR fallback...")
+            ocr_text = mistral_ocr(local_path, is_pdf=True)
+            if ocr_text:
+                return ocr_text
+            else:
+                print("⚠️ [PDF] OCR failed or is disabled. Returning whatever partial text was extracted.")
+                
+        # Return the original parsed text if it's a normal PDF or OCR failed
+        return extracted_text
 
     elif ext in [".jpg", ".jpeg", ".png"]:
         print(f"🖼️ [Image] Extension {ext} detected. Using Mistral OCR...")

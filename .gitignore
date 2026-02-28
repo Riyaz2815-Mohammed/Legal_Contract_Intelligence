@@ -10,3 +10,9 @@ frontend/.env.test
 .venv
 __pycache__/
 *.pyc
+
+# Local Storage
+backend/data/
+backend/chroma_db/
+extracter/extracted_texts/
+backend/reviews/

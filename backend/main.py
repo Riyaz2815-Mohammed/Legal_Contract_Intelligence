@@ -45,7 +45,8 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 
 
 # Load environment variables                
-load_dotenv()
+env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
+load_dotenv(env_path)
 EMAILJS_SERVICE_ID = os.getenv("EMAILJS_SERVICE_ID")
 EMAILJS_TEMPLATE_ID = os.getenv("EMAILJS_TEMPLATE_ID")
 EMAILJS_PUBLIC_KEY = os.getenv("EMAILJS_PUBLIC_KEY")
@@ -564,67 +565,21 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
         # 1. Extract text (PDF, DOCX, TXT)
         extracted_text = extract_text_from_file(str(local_path))
 
-        # 2. Parse text blocks directly (without saving local temp files)
-        # Instead of parsing a text file on disk, we can pass a mocked list of lines 
-        # to a helper, or simply update `process_document` to handle raw text.
-        # But since `clause_engine.parse_text_file` expects a file path, we'll write a temp string block parser 
-        # or just reuse the logic from `parse_text_file` directly.
-        from extracter.clause_engine import extract_structural_id
+        # 2. Parse text blocks using temp files on disk to preserve RAM
+        import tempfile
+        import os
+        from extracter.clause_engine import parse_text_file, process_document
         
-        extracted_blocks = []
-        current_page = 1
-        current_text_lines = []
-        current_block_start_page = 1
-
-        import re
-        lines = extracted_text.splitlines()
-
-        for line in lines:
-            line_stripped = line.strip()
-
-            # Check for Page Header
-            page_match = re.match(r"^PAGE\s+(\d+)", line_stripped, re.IGNORECASE)
-            if page_match:
-                current_page = int(page_match.group(1))
-                continue
-
-            # Skip separator lines
-            if re.match(r"^-+$", line_stripped):
-                continue
-
-            if not line_stripped:
-                continue
-
-            # Check if line starts a new clause
-            is_new_clause = extract_structural_id(line_stripped) is not None
-
-            if is_new_clause:
-                # Save previous block if exists
-                if current_text_lines:
-                    full_text = " ".join(current_text_lines)
-                    extracted_blocks.append({
-                        "page_number": current_block_start_page,
-                        "raw_text": full_text
-                    })
-
-                # Start new block
-                current_text_lines = [line_stripped]
-                current_block_start_page = current_page
-            else:
-                # If no block started (e.g., preamble), start one
-                if not current_text_lines:
-                    current_block_start_page = current_page
-
-                # Append to current
-                current_text_lines.append(line_stripped)
-
-        # Flush last block
-        if current_text_lines:
-            full_text = " ".join(current_text_lines)
-            extracted_blocks.append({
-                "page_number": current_block_start_page,
-                "raw_text": full_text
-            })
+        # Write to a temporary file locally so clause_engine can perfectly parse it with \n newlines
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, suffix='.txt') as temp_out:
+            temp_out.write(extracted_text)
+            temp_file_path = temp_out.name
+            
+        try:
+            extracted_blocks = parse_text_file(temp_file_path)
+        finally:
+            if os.path.exists(temp_file_path):
+                os.remove(temp_file_path)
 
         # 3. Classify — pass document type and source so every clause record is fully tagged
         results = process_document(extracted_blocks, document=document_type, source=source)
@@ -686,7 +641,11 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                         # Only analyze clauses with meaningful text
                         if len(client_text.strip()) > 10:
                             # Run pipeline: retrieves top K similar standard clauses, scores them, tags risk, runs LLM if high risk
-                            pipeline_results = run_pipeline(query_text=client_text, clause_type=clause_type)
+                            pipeline_results = run_pipeline(
+                                query_text=client_text, 
+                                clause_type=clause_type,
+                                document_type=document_type
+                            )
                             
                             # Grab the best match from the pipeline (sorted by similarity desc)
                             best_match = pipeline_results[0] if pipeline_results else None
@@ -733,14 +692,6 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
         import traceback
         print(f"[ERROR] [Background] Extraction failed for {file_name}: {str(e)}")
         print(traceback.format_exc())
-    finally:
-        # Clean up the original uploaded file from local storage to ensure privacy and save space
-        try:
-            if 'local_path' in locals() and local_path.exists():
-                local_path.unlink()
-                print(f"[INFO] [Background] Cleaned up local file: {local_path}")
-        except Exception as cleanup_err:
-            print(f"[WARNING] [Background] Could not delete local file {local_path}: {cleanup_err}")
 
 @app.post("/api/documents/upload")
 async def upload_document(

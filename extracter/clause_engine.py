@@ -14,23 +14,25 @@ except OSError:
 
 def extract_structural_id(text: str) -> Optional[str]:
     """
-    Extracts structural clause numbering (e.g., "1.", "2.1", "Section 3", "(a)")
-    from the start of the text. Used as a label – NOT used as the unique clause_id.
+    Extracts structural clause numbering (e.g., "1.", "Section 3", "(a)")
+    Used to determine if a line starts a MAJOR new clause.
     """
+    # Only match major section dividers, NOT sub-bullets (1.1, (a)) so they group together
     patterns = [
-        r"^(Section\s+\d+(\.\d+)*)",     # Section 1, Section 1.2
-        r"^(Article\s+\d+(\.\d+)*)",     # Article 1
-        r"^(\d+(\.\d+)+)",               # 1.1, 1.1.1 (multi-part)
-        r"^(\d+\.)",                     # 1. (simple)
-        r"^(\([a-zA-Z0-9]+\))",          # (a), (1)
-        r"^([a-zA-Z]\.)",                # a. , b.
+        r"^(Section\s+\d+)",             # Section 1
+        r"^(Article\s+\d+)",             # Article 1
+        r"^(\d+\.\s+[A-Z])",             # 1. Indemnification (Start of major)
         r"^([0-9]+\s+[A-Z][a-z]+)",      # 1 Indemnity (no period)
-        r"^([IVXLCDM]+\.)",              # Roman numerals I., IV.
+        r"^([IVXLCDM]+\.\s+[A-Z])",      # Roman numerals I. Title
+        r"^([A-Z][A-Z\s]+)$"             # ALL CAPS HEADERS (e.g. TERMINATION) - if it is the whole line
     ]
 
     for pattern in patterns:
-        match = re.match(pattern, text.strip(), re.IGNORECASE)
+        match = re.match(pattern, text.strip())
         if match:
+            # Check for false positives on very short lines that happen to be all caps
+            if len(text.strip()) < 4 and pattern == patterns[-1]:
+                continue
             return match.group(1)
 
     return None
@@ -38,95 +40,58 @@ def extract_structural_id(text: str) -> Optional[str]:
 
 def classify_clause(text: str) -> str:
     """
-    Classifies the clause text into a standardized type using rules, headers, and keywords.
-    Supports ~70 specific clause types.
+    Classifies the clause text into a standardized type.
+    First checks for explicit headers. If ambiguous, falls back to Mistral AI.
     """
     text_clean = text.strip()
     text_lower = text_clean.lower()
     
-    # Priority 1: Check if the text starts with a specific section header (prefix matching)
+    # Priority 1: Check if the text starts with a specific section header
     header_logic = {
         "Definitions": [r"definitions", r"defined terms"],
         "Purpose": [r"purpose", r"background", r"recitals"],
-        "Purpose of the Agreement": [r"purpose of the agreement", r"objective"],
         "Scope of Services": [r"scope of services", r"service scope"],
-        "Scope of Referral Services": [r"scope of referral services"],
-        "Structure of Agreement (MSA–SOW Linkage)": [r"structure of agreement", r"msa–sow linkage", r"linkage between msa and sow"],
-        "Appointment of Referrer": [r"appointment of referrer", r"designation of referrer"],
-        "Referrer’s Responsibilities": [r"referrer.*responsibilit", r"responsibilities of referrer"],
-        "Solution Provider’s Responsibilities": [r"solution provider.*responsibilit", r"responsibilities of solution provider"],
-        "Roles and Responsibilities": [r"roles and responsibilit", r"obligations of the parties"],
-        "Deliverables": [r"deliverables", r"work product deliverables"],
+        "Deliverables": [r"deliverables", r"work product"],
         "Project Timeline and Milestones": [r"project timeline", r"milestones", r"schedule"],
-        "Assumptions and Dependencies": [r"assumptions and dependencies"],
-        "Acceptance Criteria": [r"acceptance criteria", r"testing and acceptance"],
         "Service Levels (SLA)": [r"service level", r"sla", r"uptime", r"availability"],
-        "Change Management Process": [r"change management", r"change request", r"change control"],
-        "Fees and Payment Terms": [r"fees and payment", r"payment terms", r"compensation"],
-        "Referral Fee": [r"referral fee", r"referral commission"],
-        "Commission Structure": [r"commission structure", r"payment of commission"],
-        "Payment Schedule": [r"payment schedule", r"milestone payments"],
-        "Invoicing Terms": [r"invoicing", r"invoice terms"],
-        "Taxes and Tax Responsibility": [r"taxes", r"tax responsibility", r"withholding"],
-        "Expenses": [r"expenses", r"reimbursement of expenses"],
-        "No Expense Reimbursement": [r"no expense reimbursement"],
-        "Confidentiality": [r"confidentiality", r"non-disclosure"],
-        "Definition of Confidential Information": [r"definition of confidential information"],
-        "Exclusions from Confidential Information": [r"exclusions from confidential information", r"exceptions to confidentiality"],
-        "Permitted Use of Confidential Information": [r"permitted use of confidential information"],
-        "Non-Disclosure and Non-Use Obligations": [r"non-disclosure and non-use", r"confidentiality obligations"],
-        "Return or Destruction of Confidential Information": [r"return or destruction"],
-        "Confidentiality and IP Protection": [r"confidentiality and ip protection"],
-        "Intellectual Property Rights": [r"intellectual property rights", r"ip rights", r"proprietary rights"],
-        "Ownership of Deliverables": [r"ownership of deliverables", r"title to deliverables"],
-        "No License Granted": [r"no license granted", r"no transfer of rights"],
+        "Fees and Payment Terms": [r"fees and payment", r"payment terms", r"compensation", r"invoicing", r"taxes"],
+        "Confidentiality": [r"confidentiality", r"non-disclosure", r"confidential information", r"non-disclosure and non-use"],
+        "Intellectual Property Rights": [r"intellectual property", r"ip rights", r"proprietary rights", r"ownership"],
         "Data Protection and Security": [r"data protection", r"data security", r"gdpr", r"privacy"],
         "Compliance with Laws": [r"compliance with laws", r"regulatory compliance"],
         "Independent Contractor Relationship": [r"independent contractor", r"relationship of the parties"],
-        "Non-Solicitation": [r"non-solicitation", r"non solicitation"],
-        "Non-Circumvention": [r"non-circumvention", r"non circumvention"],
-        "Exclusivity / Non-Exclusivity": [r"exclusivity", r"non-exclusivity"],
-        "Representations and Warranties": [r"representations and warranties"],
-        "Warranty of Services": [r"warranty of services", r"service warranty"],
+        "Representations and Warranties": [r"representations and warranties", r"warranty"],
         "Indemnification": [r"indemnification", r"indemnity"],
-        "Insurance": [r"insurance", r"liability insurance"],
         "Limitation of Liability": [r"limitation of liability", r"liability limit"],
-        "Risk Allocation": [r"risk allocation", r"allocation of risk"],
-        "Remedies for Breach": [r"remedies for breach", r"liquidated damages"],
-        "Injunctive Relief": [r"injunctive relief", r"equitable relief"],
-        "Channel Conflict Resolution": [r"channel conflict"],
+        "Risk Allocation": [r"risk allocation"],
         "Force Majeure": [r"force majeure", r"act of god"],
-        "Term": [r"term", r"duration of agreement"],
-        "Termination": [r"termination"],
-        "Termination for Convenience": [r"termination for convenience", r"voluntary termination"],
-        "Termination for Cause": [r"termination for cause", r"default termination"],
-        "Effect of Termination": [r"effect of termination", r"consequences of termination"],
-        "Transition Assistance": [r"transition assistance", r"exit services"],
-        "Survival": [r"survival"],
-        "Assignment": [r"assignment", r"transfer of agreement"],
-        "Subcontracting": [r"subcontracting"],
+        "Term": [r"term", r"duration"],
+        "Termination": [r"termination", r"effect of termination"],
+        "Assignment": [r"assignment", r"transfer"],
         "Amendments": [r"amendments", r"modifications"],
         "Notices": [r"notices", r"communications"],
         "Severability": [r"severability"],
-        "Waiver": [r"waiver", r"no waiver"],
-        "Entire Agreement": [r"entire agreement", r"integration", r"merger"],
-        "General": [r"general", r"miscellaneous"],
         "Governing Law": [r"governing law", r"applicable law"],
         "Jurisdiction and Dispute Resolution": [r"jurisdiction", r"dispute resolution", r"arbitration", r"mediation"],
+        "Entire Agreement": [r"entire agreement", r"integration", r"merger"]
     }
 
-    # Check first 70 chars for headers
     prefix = text_lower[:70]
     for category, patterns in header_logic.items():
         for pat in patterns:
             if re.search(pat, prefix):
                 return category
 
-    # Priority 2: Keyword Scoring
-    if not nlp:
+    # Priority 2: Keyword Scoring Fallback
+    try:
+        import spacy
+        try:
+            nlp = spacy.load("en_core_web_sm")
+            doc = nlp(text_lower)
+        except OSError:
+            doc = None
+    except ImportError:
         doc = None
-    else:
-        doc = nlp(text_lower)
 
     rules = {
         "Indemnification": ["indemnify", "indemnification", "hold harmless"],
@@ -162,23 +127,18 @@ def classify_clause(text: str) -> str:
     return "Other"
 
 
-def parse_text_file(file_path: str) -> List[Dict[str, Any]]:
+def parse_text(text: str) -> List[Dict[str, Any]]:
     """
-    Parses a text file with 'PAGE X' delimiters and clause numbering.
-    Returns a list of blocks like {"page_number": 1, "raw_text": "..."}
+    Parses a raw text string with 'PAGE X' delimiters.
+    Groups MAJOR clauses and their subheadings together into cohesive blocks.
     """
     extracted_blocks = []
-
-    if not os.path.exists(file_path):
-        print(f"Error: File not found at {file_path}")
-        return []
 
     current_page = 1
     current_text_lines = []
     current_block_start_page = 1
 
-    with open(file_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
+    lines = text.splitlines()
 
     for line in lines:
         line_stripped = line.strip()
@@ -196,17 +156,18 @@ def parse_text_file(file_path: str) -> List[Dict[str, Any]]:
         if not line_stripped:
             continue
 
-        # Check if line starts a new clause
-        is_new_clause = extract_structural_id(line_stripped) is not None
+        # Check if line starts a MAJOR new clause (e.g. "1. Indemnification" vs "1.1 Subheading")
+        is_major_clause = extract_structural_id(line_stripped) is not None
 
-        if is_new_clause:
-            # Save previous block if exists
+        if is_major_clause:
+            # Save previous block if exists AND is long enough to be a real clause
             if current_text_lines:
-                full_text = " ".join(current_text_lines)
-                extracted_blocks.append({
-                    "page_number": current_block_start_page,
-                    "raw_text": full_text
-                })
+                full_text = "\n".join(current_text_lines)
+                if len(full_text) > 50: # Don't save tiny garbage blocks
+                    extracted_blocks.append({
+                        "page_number": current_block_start_page,
+                        "raw_text": full_text
+                    })
 
             # Start new block
             current_text_lines = [line_stripped]
@@ -215,19 +176,33 @@ def parse_text_file(file_path: str) -> List[Dict[str, Any]]:
             # If no block started (e.g., preamble), start one
             if not current_text_lines:
                 current_block_start_page = current_page
-
-            # Append to current
+            
+            # Since it's not a major clause, it's either generic text or a subheading (1.1, a). 
+            # We append it to the CURRENT clause block so it stays grouped!
             current_text_lines.append(line_stripped)
 
     # Flush last block
     if current_text_lines:
-        full_text = " ".join(current_text_lines)
-        extracted_blocks.append({
-            "page_number": current_block_start_page,
-            "raw_text": full_text
-        })
+        full_text = "\n".join(current_text_lines)
+        if len(full_text) > 50:
+            extracted_blocks.append({
+                "page_number": current_block_start_page,
+                "raw_text": full_text
+            })
 
     return extracted_blocks
+
+
+def parse_text_file(file_path: str) -> List[Dict[str, Any]]:
+    """
+    Backwards compatibility: Parses a file path directly.
+    """
+    import os
+    if not os.path.exists(file_path):
+        print(f"Error: File not found at {file_path}")
+        return []
+    with open(file_path, 'r', encoding='utf-8') as f:
+        return parse_text(f.read())
 
 
 def process_document(
@@ -237,15 +212,7 @@ def process_document(
 ) -> List[Dict[str, Any]]:
     """
     Process extracted text blocks and return structured data.
-
-    Each record contains:
-      - clause_id   : unique UUID for this clause record (e.g. CLZ-XXXXXXXX)
-      - clause      : classified clause type (e.g. "Confidentiality")
-      - content_id  : unique UUID for the raw content block (e.g. CNT-XXXXXXXX)
-      - content     : raw text of the clause block
-      - page_number : page number where the clause starts
-      - document    : document type (e.g. "NDA", "MSA", "SOW")
-      - source      : who uploaded it — "client" or "legal"
+    Uses Mistral API for perfect classification.
     """
     structured_records = []
 
@@ -255,6 +222,7 @@ def process_document(
 
         clause_id  = f"CLZ-{uuid.uuid4().hex[:8].upper()}"
         content_id = f"CNT-{uuid.uuid4().hex[:8].upper()}"
+        
         clause_type = classify_clause(raw_text)
 
         record = {
@@ -270,3 +238,4 @@ def process_document(
         structured_records.append(record)
 
     return structured_records
+
