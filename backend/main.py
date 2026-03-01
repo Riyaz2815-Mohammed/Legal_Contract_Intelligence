@@ -568,7 +568,6 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
         # 2. Parse text blocks using temp files on disk to preserve RAM
         import tempfile
         import os
-        from extracter.clause_engine import parse_text_file, process_document
         
         # Write to a temporary file locally so clause_engine can perfectly parse it with \n newlines
         with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', delete=False, suffix='.txt') as temp_out:
@@ -597,9 +596,29 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                     doc_res = cur.fetchone()
                     document_id = doc_res[0] if doc_res else None
                     
-                    for idx, clause in enumerate(results):
-                        clause_id = clause.get("clause_id") or f"CLZ-{uuid.uuid4().hex[:8]}"
-                        content_id = clause.get("content_id") or f"CNT-{uuid.uuid4().hex[:8]}"
+                    # Group clauses by type before insertion
+                    merged_clauses = {}
+                    for clause in results:
+                        ctype = clause.get("clause", "Unknown")
+                        ccontent = clause.get("content", "").strip()
+                        cpage = clause.get("page_number", 1)
+                        
+                        if ctype not in merged_clauses:
+                            merged_clauses[ctype] = {
+                                "clause_id": clause.get("clause_id") or f"CLZ-{uuid.uuid4().hex[:8].upper()}",
+                                "clause": ctype,
+                                "content_id": clause.get("content_id") or f"CNT-{uuid.uuid4().hex[:8].upper()}",
+                                "content": ccontent,
+                                "page_number": cpage
+                            }
+                        else:
+                            # Append to existing clause of the same type
+                            merged_clauses[ctype]["content"] += "\n\n" + ccontent
+                            
+                    # Update results to reflect the merged clauses for the vector pipeline
+                    results = list(merged_clauses.values())
+                    
+                    for clause in results:
                         cur.execute(
                             """
                             INSERT INTO clauses (clause_id, clause, content_id, content, page_number, document, source, document_id)
@@ -607,11 +626,11 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                             ON CONFLICT (content_id) DO NOTHING
                             """,
                             (
-                                clause_id,
-                                clause.get("clause", "Unknown"),
-                                content_id,
-                                clause.get("content", ""),
-                                clause.get("page_number", 1),
+                                clause["clause_id"],
+                                clause["clause"],
+                                clause["content_id"],
+                                clause["content"],
+                                clause["page_number"],
                                 document_type,
                                 source,
                                 document_id
@@ -620,74 +639,109 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                 conn.commit()
                 print(f"[SUCCESS] [Background] Saved {len(results)} clauses to database")
                 
-                # ------ NEW INTEGRATION: Vector Pipeline ------
-                if source == "legal":
-                    # For standard templates, refresh the ChromaDB so it includes the new clauses
-                    from vector_pipeline.embeddings.embed_store import run_embed_pipeline
-                    print(f"[INFO] [Background] Document '{file_name}' is a standard template. Updating ChromaDB...")
-                    run_embed_pipeline()
-                    print(f"[SUCCESS] [Background] ChromaDB updated with new standard template clauses.")
-                
-                elif source == "client" and document_id:
-                    # For client documents, process each clause against the ChromaDB standard templates
-                    from vector_pipeline.pipeline.full_pipeline import run_pipeline
-                    print(f"[INFO] [Background] Document '{file_name}' is a client document. Running vector review pipeline...")
-                    
-                    final_reviews = []
-                    for clause in results:
-                        client_text = clause.get("content", "")
-                        clause_type = clause.get("clause", "Unknown")
-                        
-                        # Only analyze clauses with meaningful text
-                        if len(client_text.strip()) > 10:
-                            # Run pipeline: retrieves top K similar standard clauses, scores them, tags risk, runs LLM if high risk
-                            pipeline_results = run_pipeline(
-                                query_text=client_text, 
-                                clause_type=clause_type,
-                                document_type=document_type
-                            )
-                            
-                            # Grab the best match from the pipeline (sorted by similarity desc)
-                            best_match = pipeline_results[0] if pipeline_results else None
-                            
-                            review_entry = {
-                                "clause_id": clause.get("clause_id"),
-                                "clause": clause_type,
-                                "content": client_text,
-                                "page_number": clause.get("page_number", 1),
-                                "risk_analysis": best_match # Contains final_risk, template_content, sbert_similarity, llm_reasoning, etc.
-                            }
-                            final_reviews.append(review_entry)
-                        else:
-                            # Skip tiny lines/headers
-                            final_reviews.append({
-                                "clause_id": clause.get("clause_id"),
-                                "clause": clause_type,
-                                "content": client_text,
-                                "page_number": clause.get("page_number", 1),
-                                "risk_analysis": None
-                            })
-
-                    # Save the complete review JSON for the legal team's dashboard
-                    reviews_dir = DATA_DIR / "reviews"
-                    reviews_dir.mkdir(parents=True, exist_ok=True)
-                    review_path = reviews_dir / f"{document_id}.json"
-                    
-                    with open(review_path, "w", encoding="utf-8") as f:
-                        json.dump(final_reviews, f, indent=4)
-                        
-                    print(f"[SUCCESS] [Background] Vector review pipeline complete. Saved to {review_path}.")
-                # ----------------------------------------------
-                
         except Exception as db_err:
-            print(f"[ERROR] [Background] Failed to process vector pipeline or save clauses: {db_err}")
+            print(f"[ERROR] [Background] Failed to save clauses format: {db_err}")
             if conn: conn.rollback()
             import traceback
             traceback.print_exc()
         finally:
-            if conn: db_pool.putconn(conn)
+            if conn: 
+                db_pool.putconn(conn)
+                conn = None # Prevent reuse below
+                
+        # ------ NEW INTEGRATION: Vector Pipeline ------
+        # Run independent of the DB transaction. If this crashes, the clauses are still safely saved!
+        try:
+            if source == "legal":
+                # For standard templates, refresh the ChromaDB so it includes the new clauses
+                from vector_pipeline.embeddings.embed_store import run_embed_pipeline
+                print(f"[INFO] [Background] Document '{file_name}' is a standard template. Updating ChromaDB...")
+                run_embed_pipeline()
+                print(f"[SUCCESS] [Background] ChromaDB updated with new standard template clauses.")
+            
+            elif source == "client" and document_id:
+                # For client documents, process each clause against the ChromaDB standard templates
+                from vector_pipeline.pipeline.full_pipeline import run_pipeline
+                print(f"[INFO] [Background] Document '{file_name}' is a client document. Running vector review pipeline...")
+                
+                final_reviews = []
+                for clause in results:
+                    client_text = clause.get("content", "")
+                    clause_type = clause.get("clause", "Unknown")
+                    
+                    # Only analyze clauses with meaningful text
+                    if len(client_text.strip()) > 10:
+                        # Run pipeline: retrieves top K similar standard clauses, scores them, tags risk, runs LLM if high risk
+                        pipeline_results = run_pipeline(
+                            query_text=client_text, 
+                            clause_type=clause_type,
+                            document_type=document_type
+                        )
+                        
+                        # Grab the best match from the pipeline (sorted by similarity desc)
+                        best_match = pipeline_results[0] if pipeline_results else None
+                        
+                        # Map backend pipeline results perfectly to exactly what ClauseReview.jsx expects
+                        if best_match:
+                            review_entry = {
+                                "content_id": clause.get("content_id"),
+                                "clause_id": clause.get("clause_id"),
+                                "clause_type": clause_type,
+                                "content": client_text,
+                                "page_number": clause.get("page_number", 1),
+                                "risk": best_match.get("final_risk", "High"),
+                                "similarity_score": best_match.get("sbert_similarity"),
+                                "matched_clause": {
+                                    "content": best_match.get("template_content"),
+                                    "document_type": best_match.get("template_metadata", {}).get("document_type", "Template")
+                                },
+                                "llm_reasoning": best_match.get("llm_reasoning"),
+                                "status": "pending"
+                            }
+                        else:
+                            review_entry = {
+                                "content_id": clause.get("content_id"),
+                                "clause_id": clause.get("clause_id"),
+                                "clause_type": clause_type,
+                                "content": client_text,
+                                "page_number": clause.get("page_number", 1),
+                                "risk": "High",
+                                "similarity_score": 0.0,
+                                "matched_clause": None,
+                                "status": "pending"
+                            }
+                        final_reviews.append(review_entry)
+                    else:
+                        # Skip tiny lines/headers
+                        final_reviews.append({
+                            "content_id": clause.get("content_id"),
+                            "clause_id": clause.get("clause_id"),
+                            "clause_type": clause_type,
+                            "content": client_text,
+                            "page_number": clause.get("page_number", 1),
+                            "risk": "Low",
+                            "similarity_score": None,
+                            "matched_clause": None,
+                            "status": "pending"
+                        })
 
-        print(f"[SUCCESS] [Background] Classification complete for {file_name}: {len(results)} clauses saved.")
+                # Save the complete review JSON for the legal team's dashboard
+                reviews_dir = DATA_DIR / "reviews"
+                reviews_dir.mkdir(parents=True, exist_ok=True)
+                review_path = reviews_dir / f"{document_id}.json"
+                
+                with open(review_path, "w", encoding="utf-8") as f:
+                    json.dump(final_reviews, f, indent=4)
+                    
+                print(f"[SUCCESS] [Background] Vector review pipeline complete. Saved to {review_path}.")
+                
+        except Exception as vector_err:
+            print(f"[ERROR] [Background] Vector pipeline failed: {vector_err}")
+            import traceback
+            traceback.print_exc()
+        # ----------------------------------------------
+
+        print(f"[SUCCESS] [Background] Classification complete for {file_name}: {len(results)} clauses processed.")
     except Exception as e:
         import traceback
         print(f"[ERROR] [Background] Extraction failed for {file_name}: {str(e)}")
