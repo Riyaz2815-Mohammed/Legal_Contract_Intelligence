@@ -14,12 +14,10 @@ def query_vectorstore(
 ) -> list:
     try:
         filters = []
-        if clause_type:
-            filters.append({"clause": clause_type})
         if document_type and document_type != "Unknown":
             filters.append({"document": document_type})
 
-        # Chroma requires $and if multiple filters exist
+        # Chroma requires $and if multiple filters exist (legacy check, but kept for future proofing)
         if len(filters) > 1:
             filter_dict = {"$and": filters}
         elif len(filters) == 1:

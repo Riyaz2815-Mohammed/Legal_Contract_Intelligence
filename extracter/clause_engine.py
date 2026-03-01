@@ -17,22 +17,26 @@ def extract_structural_id(text: str) -> Optional[str]:
     Extracts structural clause numbering (e.g., "1.", "Section 3", "(a)")
     Used to determine if a line starts a MAJOR new clause.
     """
-    # Only match major section dividers, NOT sub-bullets (1.1, (a)) so they group together
+    # Exclude sub-bullets like 1.1 or (a) so they stay grouped under their major header
     patterns = [
         r"^(Section\s+\d+)",             # Section 1
         r"^(Article\s+\d+)",             # Article 1
         r"^(\d+\.\s+[A-Z])",             # 1. Indemnification (Start of major)
         r"^([0-9]+\s+[A-Z][a-z]+)",      # 1 Indemnity (no period)
         r"^([IVXLCDM]+\.\s+[A-Z])",      # Roman numerals I. Title
-        r"^([A-Z][A-Z\s]+)$"             # ALL CAPS HEADERS (e.g. TERMINATION) - if it is the whole line
+        r"^([A-Z][A-Z\s]+)$",            # ALL CAPS HEADERS (e.g. TERMINATION) - if it is the whole line
+        r"^(Clause\s+\d+)"               # Clause 1
     ]
 
+    text_clean = text.strip()
+    
+    # Very short single words are usually OCR noise or signatures, ignore them
+    if len(text_clean) < 4:
+        return None
+
     for pattern in patterns:
-        match = re.match(pattern, text.strip())
+        match = re.match(pattern, text_clean)
         if match:
-            # Check for false positives on very short lines that happen to be all caps
-            if len(text.strip()) < 4 and pattern == patterns[-1]:
-                continue
             return match.group(1)
 
     return None
@@ -41,38 +45,31 @@ def extract_structural_id(text: str) -> Optional[str]:
 def classify_clause(text: str) -> str:
     """
     Classifies the clause text into a standardized type.
-    First checks for explicit headers. If ambiguous, falls back to Mistral AI.
+    First checks for explicit headers. If ambiguous, falls back to SpaCy Keyword Matching.
     """
     text_clean = text.strip()
     text_lower = text_clean.lower()
     
     # Priority 1: Check if the text starts with a specific section header
     header_logic = {
-        "Definitions": [r"definitions", r"defined terms"],
-        "Purpose": [r"purpose", r"background", r"recitals"],
-        "Scope of Services": [r"scope of services", r"service scope"],
-        "Deliverables": [r"deliverables", r"work product"],
-        "Project Timeline and Milestones": [r"project timeline", r"milestones", r"schedule"],
+        "Purpose": [r"purpose", r"background", r"recitals", r"engagement"],
+        "Deliverables": [r"deliverables", r"work product", r"milestones", r"schedule"],
         "Service Levels (SLA)": [r"service level", r"sla", r"uptime", r"availability"],
-        "Fees and Payment Terms": [r"fees and payment", r"payment terms", r"compensation", r"invoicing", r"taxes"],
-        "Confidentiality": [r"confidentiality", r"non-disclosure", r"confidential information", r"non-disclosure and non-use"],
+        "Payment Terms": [r"fees", r"payment terms", r"compensation", r"invoicing", r"taxes"],
+        "Confidentiality": [r"confidentiality", r"non-disclosure", r"confidential information"],
         "Intellectual Property Rights": [r"intellectual property", r"ip rights", r"proprietary rights", r"ownership"],
-        "Data Protection and Security": [r"data protection", r"data security", r"gdpr", r"privacy"],
-        "Compliance with Laws": [r"compliance with laws", r"regulatory compliance"],
-        "Independent Contractor Relationship": [r"independent contractor", r"relationship of the parties"],
-        "Representations and Warranties": [r"representations and warranties", r"warranty"],
-        "Indemnification": [r"indemnification", r"indemnity"],
+        "Data Protection and Security": [r"data protection", r"data security", r"gdpr", r"privacy", r"personal data"],
+        "Relationship": [r"independent contractor", r"relationship of the parties", r"employment"],
+        "Warranty": [r"representations and warranties", r"warranty"],
+        "Indemnity": [r"indemnification", r"indemnity"],
         "Limitation of Liability": [r"limitation of liability", r"liability limit"],
-        "Risk Allocation": [r"risk allocation"],
         "Force Majeure": [r"force majeure", r"act of god"],
-        "Term": [r"term", r"duration"],
+        "Term": [r"term", r"duration", r"commencement"],
         "Termination": [r"termination", r"effect of termination"],
         "Assignment": [r"assignment", r"transfer"],
-        "Amendments": [r"amendments", r"modifications"],
         "Notices": [r"notices", r"communications"],
         "Severability": [r"severability"],
-        "Governing Law": [r"governing law", r"applicable law"],
-        "Jurisdiction and Dispute Resolution": [r"jurisdiction", r"dispute resolution", r"arbitration", r"mediation"],
+        "Governing Law": [r"governing law", r"applicable law", r"dispute resolution", r"jurisdiction", r"arbitration"],
         "Entire Agreement": [r"entire agreement", r"integration", r"merger"]
     }
 
@@ -94,21 +91,25 @@ def classify_clause(text: str) -> str:
         doc = None
 
     rules = {
-        "Indemnification": ["indemnify", "indemnification", "hold harmless"],
-        "Limitation of Liability": ["limitation of liability", "cap on liability", "consequential damages"],
-        "Confidentiality": ["confidential", "non-disclosure", "proprietary information"],
-        "Termination": ["terminate", "termination", "cancellation"],
-        "Payment Terms": ["payment", "invoice", "fees"],
-        "Service Levels (SLA)": ["service level", "sla", "uptime"],
-        "Governing Law": ["governing law", "jurisdiction", "laws of"],
-        "Intellectual Property Rights": ["intellectual property", "ip rights", "copyright", "trademark"],
-        "Deliverables": ["deliverables", "work product"],
-        "Data Protection and Security": ["data protection", "gdpr", "privacy"],
-        "Force Majeure": ["force majeure", "act of god"],
-        "Assignment": ["assignment", "assignability"],
-        "Notices": ["notices", "written notice"],
-        "Severability": ["severability", "invalidity"],
-        "Entire Agreement": ["entire agreement", "supersedes"],
+        "Confidentiality": ["confidential", "non-disclosure", "secrecy", "proprietary information", "trade secret"],
+        "Indemnity": ["indemnify", "indemnification", "hold harmless", "defend", "liable"],
+        "Limitation of Liability": ["limitation of liability", "cap on liability", "consequential damages", "indirect damages", "maximum liability"],
+        "Warranty": ["warrant", "warranty", "representation", "merchantability", "fitness for a particular purpose", "as is"],
+        "Termination": ["terminate", "termination", "cancellation", "expiration", "survival", "breach"],
+        "Payment Terms": ["payment", "invoice", "fees", "taxes", "billing", "compensation"],
+        "Service Levels (SLA)": ["service level", "sla", "uptime", "downtime", "credit", "support", "maintenance"],
+        "Governing Law": ["governing law", "jurisdiction", "venue", "dispute resolution", "arbitration", "courts"],
+        "Intellectual Property Rights": ["intellectual property", "ip rights", "copyright", "trademark", "patent", "license", "ownership", "moral rights"],
+        "Deliverables": ["deliverables", "work product", "milestone", "acceptance criteria"],
+        "Data Protection and Security": ["data protection", "gdpr", "privacy", "security", "personal data", "ccpa"],
+        "Force Majeure": ["force majeure", "act of god", "pandemic", "unforeseeable", "beyond reasonable control"],
+        "Assignment": ["assignment", "assign", "transfer", "successors"],
+        "Notices": ["notices", "written notice", "communication"],
+        "Severability": ["severability", "invalidity", "enforceability"],
+        "Entire Agreement": ["entire agreement", "supersedes", "integration", "prior agreements"],
+        "Term": ["term", "duration", "commencement", "effective date", "renewal"],
+        "Purpose": ["purpose", "engagement", "scope", "services"],
+        "Relationship": ["independent contractor", "relationship of the parties", "employment", "agency", "partnership"]
     }
 
     scores = {category: 0 for category in rules}
@@ -117,8 +118,15 @@ def classify_clause(text: str) -> str:
 
     for category, keywords in rules.items():
         for keyword in keywords:
+            # Check for exact keyword match or if it's a substring
             if keyword in token_text or keyword in text_lower:
                 scores[category] += 1
+                
+    # Boost title matches
+    for category, keywords in rules.items():
+        for keyword in keywords:
+            if keyword in text_lower[:50]: # Title/Start of string
+                 scores[category] += 2
 
     best_match = max(scores, key=scores.get)
     if scores[best_match] > 0:
@@ -129,13 +137,13 @@ def classify_clause(text: str) -> str:
 
 def parse_text(text: str) -> List[Dict[str, Any]]:
     """
-    Parses a raw text string with 'PAGE X' delimiters.
-    Groups MAJOR clauses and their subheadings together into cohesive blocks.
+    Parses a raw text string. Identifies literal headings and groups the text 
+    underneath them into cohesive blocks.
     """
     extracted_blocks = []
-
     current_page = 1
-    current_text_lines = []
+    current_heading = "Preamble"
+    current_content_lines = []
     current_block_start_page = 1
 
     lines = text.splitlines()
@@ -156,38 +164,36 @@ def parse_text(text: str) -> List[Dict[str, Any]]:
         if not line_stripped:
             continue
 
-        # Check if line starts a MAJOR new clause (e.g. "1. Indemnification" vs "1.1 Subheading")
-        is_major_clause = extract_structural_id(line_stripped) is not None
+        # Check if line starts a MAJOR new clause
+        match = extract_structural_id(line_stripped)
 
-        if is_major_clause:
-            # Save previous block if exists AND is long enough to be a real clause
-            if current_text_lines:
-                full_text = "\n".join(current_text_lines)
-                if len(full_text) > 50: # Don't save tiny garbage blocks
+        if match is not None:
+            # Save the previous block
+            full_content = "\n".join(current_content_lines).strip()
+            if full_content or current_heading != "Preamble":
+                if len(full_content) > 10 or current_heading != "Preamble":
                     extracted_blocks.append({
                         "page_number": current_block_start_page,
-                        "raw_text": full_text
+                        "heading": current_heading,
+                        "content": full_content
                     })
 
-            # Start new block
-            current_text_lines = [line_stripped]
+            # Start new block with the exact literal heading
+            current_heading = line_stripped 
+            current_content_lines = []
             current_block_start_page = current_page
         else:
-            # If no block started (e.g., preamble), start one
-            if not current_text_lines:
-                current_block_start_page = current_page
-            
-            # Since it's not a major clause, it's either generic text or a subheading (1.1, a). 
-            # We append it to the CURRENT clause block so it stays grouped!
-            current_text_lines.append(line_stripped)
+            # Just another line of text - append to current block
+            current_content_lines.append(line_stripped)
 
     # Flush last block
-    if current_text_lines:
-        full_text = "\n".join(current_text_lines)
-        if len(full_text) > 50:
+    full_content = "\n".join(current_content_lines).strip()
+    if full_content or current_heading != "Preamble":
+        if len(full_content) > 10 or current_heading != "Preamble":
             extracted_blocks.append({
                 "page_number": current_block_start_page,
-                "raw_text": full_text
+                "heading": current_heading,
+                "content": full_content
             })
 
     return extracted_blocks
@@ -212,24 +218,34 @@ def process_document(
 ) -> List[Dict[str, Any]]:
     """
     Process extracted text blocks and return structured data.
-    Uses Mistral API for perfect classification.
+    Uses AI/regex to classify the clause, but saves the literal heading + body 
+    precisely as the 'content' field in the DB.
     """
     structured_records = []
 
     for block in extracted_blocks:
-        raw_text = block.get("raw_text", "").strip()
-        page_num = block.get("page_number")
+        heading = block.get("heading", "Clause").strip()
+        body = block.get("content", "").strip()
+        page_num = block.get("page_number", 1)
+
+        # Full context string used for classification
+        full_text_for_class = f"{heading}\n{body}".strip()
+        
+        # Determine the standardized category (e.g. 'Payment Terms')
+        clause_type = classify_clause(full_text_for_class)
+
+        # Truncate heading just in case it's huge
+        if len(heading) > 150:
+            heading = heading[:150] + "..."
 
         clause_id  = f"CLZ-{uuid.uuid4().hex[:8].upper()}"
         content_id = f"CNT-{uuid.uuid4().hex[:8].upper()}"
-        
-        clause_type = classify_clause(raw_text)
 
         record = {
             "clause_id":   clause_id,
             "clause":      clause_type,
             "content_id":  content_id,
-            "content":     raw_text,
+            "content":     full_text_for_class, # Stores Heading + Body precisely without splitting
             "page_number": page_num,
             "document":    document,
             "source":      source,
