@@ -2,7 +2,6 @@ from vector_pipeline.embeddings.embed_store import get_embedding_model, load_vec
 from vector_pipeline.retrieval.query import query_vectorstore
 from vector_pipeline.similarity.sbert_scorer import compute_similarity
 from vector_pipeline.risk.risk_tagger import tag_risk
-from vector_pipeline.llm.reasoning import run_llm_reasoning
 from vector_pipeline.config.settings import TOP_K
 
 import logging
@@ -38,19 +37,9 @@ def run_pipeline(query_text: str, clause_type: str = None, document_type: str = 
                 "chroma_score": round(chroma_score, 4),
                 "sbert_similarity": sbert_score,
                 **risk_result,
-                "template_metadata": doc.metadata
+                "template_metadata": doc.metadata,
+                "llm_reasoning": None # Made explicitly On-Demand from the Frontend
             }
-
-            # Auto LLM for high risk
-            if item["needs_llm"]:
-                try:
-                    logger.warning(f"🔴 High risk clause detected: {item.get('clause')} — triggering LLM")
-                    item["llm_reasoning"] = run_llm_reasoning(item)
-                except Exception as llm_err:
-                    logger.error(f"🔴 LLM Reasoning failed for {item.get('clause')}: {llm_err}")
-                    item["llm_reasoning"] = f"LLM Analysis failed: {str(llm_err)}"
-            else:
-                item["llm_reasoning"] = None
 
             final.append(item)
 

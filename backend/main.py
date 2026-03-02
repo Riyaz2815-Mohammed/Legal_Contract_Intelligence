@@ -733,13 +733,49 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                 with open(review_path, "w", encoding="utf-8") as f:
                     json.dump(final_reviews, f, indent=4)
                     
-                print(f"[SUCCESS] [Background] Vector review pipeline complete. Saved to {review_path}.")
+                # [NEW] Save to PostgreSQL document_reviews table
+                try:
+                    if db_pool:
+                        temp_conn = db_pool.getconn()
+                        try:
+                            with temp_conn.cursor() as cur:
+                                cur.execute(
+                                    """
+                                    INSERT INTO document_reviews (document_id, review_data)
+                                    VALUES (%s, %s)
+                                    ON CONFLICT (document_id) DO UPDATE 
+                                    SET review_data = EXCLUDED.review_data, created_at = NOW()
+                                    """,
+                                    (document_id, json.dumps(final_reviews))
+                                )
+                            temp_conn.commit()
+                        finally:
+                            db_pool.putconn(temp_conn)
+                except Exception as db_err:
+                    print(f"[ERROR] [Background] Failed to save review to DB: {db_err}")
+                
+                print(f"[SUCCESS] [Background] Vector review pipeline complete. Saved to {review_path} and DB.")
                 
         except Exception as vector_err:
             print(f"[ERROR] [Background] Vector pipeline failed: {vector_err}")
             import traceback
             traceback.print_exc()
         # ----------------------------------------------
+
+        # Update document status to 'completed' in PostgreSQL
+        if document_id and db_pool:
+            update_conn = None
+            try:
+                update_conn = db_pool.getconn()
+                with update_conn.cursor() as cur:
+                    cur.execute("UPDATE documents SET status = 'completed' WHERE id = %s", (document_id,))
+                update_conn.commit()
+                print(f"[SUCCESS] [Background] Document status marked as 'completed' for {document_id}")
+            except Exception as e:
+                print(f"[ERROR] [Background] Failed to update document status: {e}")
+                if update_conn: update_conn.rollback()
+            finally:
+                if update_conn: db_pool.putconn(update_conn)
 
         print(f"[SUCCESS] [Background] Classification complete for {file_name}: {len(results)} clauses processed.")
     except Exception as e:
@@ -796,7 +832,24 @@ async def upload_document(
     except Exception as e:
         print(f"[ERROR] S3 Upload Unexpected Error: {type(e).__name__}: {e}")
         s3_url = None
+    # Get users to share with automatically if uploaded by client
+    final_shared_with = list(shared_with) if shared_with else []
     
+    if current_user["role"] == "client" and db_pool:
+        temp_conn = None
+        try:
+            temp_conn = db_pool.getconn()
+            with temp_conn.cursor() as cur:
+                cur.execute("SELECT id FROM users WHERE role IN ('admin', 'legal_team')")
+                admin_ids = [row[0] for row in cur.fetchall()]
+                for admin_id in admin_ids:
+                    if admin_id not in final_shared_with:
+                        final_shared_with.append(admin_id)
+        except Exception as e:
+            print(f"[ERROR] Failed to fetch admins for auto-share: {e}")
+        finally:
+            if temp_conn: db_pool.putconn(temp_conn)
+
     # Determine status based on document type
     status = "pending" if document_type.startswith("NDA") else "uploaded"
     doc_uuid = f"doc-{uuid.uuid4().hex[:8]}"
@@ -810,7 +863,7 @@ async def upload_document(
         "user_role": current_user["role"],
         "size": len(content),
         "status": status,
-        "shared_with": shared_with if shared_with else [],
+        "shared_with": final_shared_with,
         "uploaded_at": datetime.now(),
         "file_path": str(file_path),
         "s3_url": s3_url,
@@ -1378,12 +1431,34 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
             if not doc: raise HTTPException(status_code=404)
             if current_user["role"] == "client" and doc[1] != current_user["user_id"]: raise HTTPException(status_code=403)
             
-            # Risk file check
-            reviews_dir = DATA_DIR / "reviews"
-            review_path = reviews_dir / f"{document_id}.json"
-            if review_path.exists():
-                with open(review_path, "r", encoding="utf-8") as f:
-                    return {"clauses": json.load(f), "status": "complete"}
+            # 1. DB check for risk analysis
+            cur.execute("SELECT review_data FROM document_reviews WHERE document_id = %s", (document_id,))
+            db_review = cur.fetchone()
+            
+            clauses = None
+            if db_review:
+                clauses = db_review[0]
+            else:
+                # 2. Risk file check (Fallback)
+                reviews_dir = DATA_DIR / "reviews"
+                review_path = reviews_dir / f"{document_id}.json"
+                if review_path.exists():
+                    with open(review_path, "r", encoding="utf-8") as f:
+                        clauses = json.load(f)
+                        
+            if clauses is not None:
+                # Fetch live approval statuses from DB
+                cur.execute("SELECT content_id, approval_status FROM clauses WHERE document_id = %s", (document_id,))
+                status_map = {row[0]: row[1] for row in cur.fetchall()}
+                
+                # Apply live statuses to the JSON payload
+                for clause in clauses:
+                    cid = clause.get("content_id")
+                    if cid and cid in status_map:
+                        # Use the live DB status, default to pending if missing
+                        clause["status"] = status_map[cid] or "pending" 
+                        
+                return {"clauses": clauses, "status": "complete"}
             
             # Fallback analysis
             if doc[2]:
@@ -1423,27 +1498,25 @@ def clause_action(document_id: str, req: ClauseActionRequest, current_user: dict
                 raise HTTPException(status_code=403, detail="Forbidden")
 
 
-        reviews_dir = DATA_DIR / "reviews"
-        review_path = reviews_dir / f"{document_id}.json"
-
-        if not review_path.exists():
-            raise HTTPException(status_code=404, detail="Review not ready yet — please wait for processing")
-
-        with open(review_path, "r", encoding="utf-8") as f:
-            clauses = json.load(f)
-
+        # Update PostgreSQL directly instead of the temporary JSON
         updated = False
-        for clause in clauses:
-            if clause.get("content_id") == req.content_id:
-                clause["status"] = "accepted" if req.action == "accept" else "rejected"
-                updated = True
-                break
-
+        try:
+            with conn.cursor() as cur:
+                new_status = "accepted" if req.action == "accept" else "rejected"
+                cur.execute(
+                    "UPDATE clauses SET approval_status = %s WHERE content_id = %s RETURNING id",
+                    (new_status, req.content_id)
+                )
+                if cur.fetchone():
+                    updated = True
+            conn.commit()
+        except Exception as e:
+            print(f"[ERROR] DB update failed for clause action: {e}")
+            conn.rollback()
+            raise HTTPException(status_code=500, detail="Database error during approval")
+            
         if not updated:
-            raise HTTPException(status_code=404, detail="Clause not found")
-
-        with open(review_path, "w", encoding="utf-8") as f:
-            json.dump(clauses, f, indent=2)
+            raise HTTPException(status_code=404, detail="Clause not found in database")
 
         return {"message": f"Clause {req.action}ed", "content_id": req.content_id}
     except HTTPException: raise
@@ -1476,22 +1549,60 @@ def ask_llm_about_clause(
     with open(review_path, "r", encoding="utf-8") as f:
         clauses = json.load(f)
 
+    # Find the specific clause the user clicked on
     clause = next((c for c in clauses if c.get("content_id") == req.content_id), None)
     if not clause:
         raise HTTPException(status_code=404, detail="Clause not found")
 
     try:
-        from llm.reasoner import ask_llm
-        answer = ask_llm(
-            clause_text=clause.get("content", ""),
-            clause_type=clause.get("clause_type", "Other"),
-            question=req.question,
+        from vector_pipeline.llm.reasoning import get_llm
+        from langchain_core.messages import HumanMessage
+        
+        # Build an ad-hoc prompt to ask Mistral about this specific clause
+        llm = get_llm()
+        prompt = (
+            f"You are a legal AI assistant. The user is reviewing a clause categorized as: '{clause.get('clause', 'Unknown')}'.\n\n"
+            f"Clause Text: {clause.get('content', '')}\n\n"
+            f"User Question: {req.question}\n\n"
+            f"Answer the user's question directly, concisely, and based ONLY on the legal clause text provided above."
         )
-        return {"answer": answer, "content_id": req.content_id}
+        
+        response = llm.invoke([HumanMessage(content=prompt)])
+        return {"answer": response.content, "content_id": req.content_id}
+        
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"LLM error: {str(e)}")
-    finally:
-        if conn: db_pool.putconn(conn)
+
+class ChatRequest(BaseModel):
+    message: str
+
+
+@app.post("/api/documents/chat/{document_id}")
+def document_chat(
+    document_id: str,
+    req: ChatRequest,
+    current_user: dict = Depends(verify_token)
+):
+    """Global Chatbot Agent for the entire document."""
+    try:
+        from vector_pipeline.llm.document_agent import chat_with_document
+        
+        # In a real app, bind the session ID to the user ID & document ID
+        session_id = f"session_{current_user['user_id']}_{document_id}"
+        
+        response = chat_with_document(
+            document_id=document_id,
+            user_message=req.message,
+            session_id=session_id
+        )
+        return {"response": response}
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Chat Agent error: {str(e)}")
+
 
 if __name__ == "__main__":
     import uvicorn

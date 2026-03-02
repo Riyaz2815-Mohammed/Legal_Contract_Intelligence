@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../layouts/Layout';
+import DocumentChatbot from '../components/DocumentChatbot';
 import './ClauseReview.css';
 
 const API_URL = 'http://localhost:8000';
@@ -32,7 +33,7 @@ const RISK_CONFIG = {
 function ClauseCard({ clause, documentId, onActionDone }) {
     const [expanded, setExpanded] = useState(false);
     const [llmOpen, setLlmOpen] = useState(false);
-    const [question, setQuestion] = useState('');
+    const [question, setQuestion] = useState('Please analyze the risks and implications of this exact clause, and suggest how it could be made more favorable.');
     const [llmAnswer, setLlmAnswer] = useState('');
     const [llmLoading, setLlmLoading] = useState(false);
     const [actionLoading, setActionLoading] = useState(false);
@@ -208,6 +209,7 @@ export default function ClauseReview({ user, onLogout }) {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [activeTab, setActiveTab] = useState('All');
 
     const fetchReview = async () => {
         try {
@@ -264,6 +266,13 @@ export default function ClauseReview({ user, onLogout }) {
         return acc;
     }, {});
 
+    // Filtered clauses
+    const filteredClauses = clauses.filter(c => {
+        if (activeTab === 'All') return true;
+        const r = c.risk || 'High';
+        return r === activeTab;
+    });
+
     return (
         <Layout user={user} onLogout={onLogout} pageTitle="Clause Review">
             <div className="review-page">
@@ -301,12 +310,43 @@ export default function ClauseReview({ user, onLogout }) {
                     </div>
                 </div>
 
-                {/* Risk summary pills */}
+                {/* Risk Tab Filters */}
                 {clauses.length > 0 && (
-                    <div className="risk-summary">
-                        {counts.High && <span className="risk-pill high">🔴 High: {counts.High}</span>}
-                        {counts.Medium && <span className="risk-pill medium">🟡 Medium: {counts.Medium}</span>}
-                        {counts.Low && <span className="risk-pill low">🟢 Low: {counts.Low}</span>}
+                    <div className="risk-tabs" style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+                        <button
+                            className={`risk-tab-btn ${activeTab === 'All' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('All')}
+                            style={{ padding: '0.5rem 1rem', borderRadius: '999px', border: '1px solid #334155', background: activeTab === 'All' ? '#334155' : 'transparent', color: 'white', cursor: 'pointer' }}
+                        >
+                            All ({clauses.length})
+                        </button>
+                        {counts.High > 0 && (
+                            <button
+                                className={`risk-tab-btn high ${activeTab === 'High' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('High')}
+                                style={{ padding: '0.5rem 1rem', borderRadius: '999px', border: '1px solid #ef4444', background: activeTab === 'High' ? '#ef444422' : 'transparent', color: '#ef4444', cursor: 'pointer' }}
+                            >
+                                🔴 High Risk ({counts.High})
+                            </button>
+                        )}
+                        {counts.Medium > 0 && (
+                            <button
+                                className={`risk-tab-btn medium ${activeTab === 'Medium' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('Medium')}
+                                style={{ padding: '0.5rem 1rem', borderRadius: '999px', border: '1px solid #f59e0b', background: activeTab === 'Medium' ? '#f59e0b22' : 'transparent', color: '#f59e0b', cursor: 'pointer' }}
+                            >
+                                🟡 Medium Risk ({counts.Medium})
+                            </button>
+                        )}
+                        {counts.Low > 0 && (
+                            <button
+                                className={`risk-tab-btn low ${activeTab === 'Low' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('Low')}
+                                style={{ padding: '0.5rem 1rem', borderRadius: '999px', border: '1px solid #10b981', background: activeTab === 'Low' ? '#10b98122' : 'transparent', color: '#10b981', cursor: 'pointer' }}
+                            >
+                                🟢 Low Risk ({counts.Low})
+                            </button>
+                        )}
                     </div>
                 )}
 
@@ -320,9 +360,13 @@ export default function ClauseReview({ user, onLogout }) {
                                 : 'No clauses found in this document.'}
                         </p>
                     </div>
+                ) : filteredClauses.length === 0 ? (
+                    <div className="review-processing">
+                        <p>No clauses match the {activeTab} risk filter.</p>
+                    </div>
                 ) : (
                     <div className="review-grid">
-                        {clauses.map((clause, idx) => (
+                        {filteredClauses.map((clause, idx) => (
                             <ClauseCard
                                 key={clause.content_id || idx}
                                 clause={clause}
@@ -332,6 +376,9 @@ export default function ClauseReview({ user, onLogout }) {
                         ))}
                     </div>
                 )}
+
+                {/* Floating Chat Assistant */}
+                <DocumentChatbot documentId={documentId} />
             </div>
         </Layout>
     );
