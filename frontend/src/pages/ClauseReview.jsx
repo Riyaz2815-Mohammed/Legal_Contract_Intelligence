@@ -8,6 +8,7 @@ const API_URL = 'http://localhost:8000';
 
 /* ── Colour helpers ──────────────────────────────────────────── */
 const CLAUSE_COLORS = {
+    'Header': '#7c3aed',
     'Indemnity': '#ef4444',
     'Limitation of Liability': '#f59e0b',
     'Confidentiality': '#3b82f6',
@@ -21,7 +22,6 @@ const CLAUSE_COLORS = {
     'Data Protection': '#0ea5e9',
     'Other': '#64748b',
 };
-const clauseColor = (type) => CLAUSE_COLORS[type] || '#64748b';
 
 const RISK_CONFIG = {
     High: { class: 'high', icon: '🔴', barColor: '#ef4444' },
@@ -29,179 +29,12 @@ const RISK_CONFIG = {
     Low: { class: 'low', icon: '🟢', barColor: '#10b981' },
 };
 
-/* ── Sub-component: single clause card ───────────────────────── */
-function ClauseCard({ clause, documentId, onActionDone }) {
-    const [expanded, setExpanded] = useState(false);
-    const [llmOpen, setLlmOpen] = useState(false);
-    const [question, setQuestion] = useState('Please analyze the risks and implications of this exact clause, and suggest how it could be made more favorable.');
-    const [llmAnswer, setLlmAnswer] = useState('');
-    const [llmLoading, setLlmLoading] = useState(false);
-    const [actionLoading, setActionLoading] = useState(false);
+// Normalise risk strings coming from backend ('high' → 'High')
+const normalizeRisk = (r) => {
+    if (!r) return 'High';
+    return r.charAt(0).toUpperCase() + r.slice(1).toLowerCase();
+};
 
-    const risk = clause.risk || 'High';
-    const rc = RISK_CONFIG[risk] || RISK_CONFIG.High;
-    const color = clauseColor(clause.clause_type);
-    const score = clause.similarity_score;
-    const status = clause.status || 'pending';
-
-    const handleAction = async (action) => {
-        setActionLoading(true);
-        try {
-            const token = localStorage.getItem('token');
-            await fetch(`${API_URL}/api/documents/review/${documentId}/action`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ content_id: clause.content_id, action }),
-            });
-            onActionDone();
-        } catch (err) {
-            console.error('Action error', err);
-        } finally {
-            setActionLoading(false);
-        }
-    };
-
-    const handleAskLLM = async () => {
-        if (!question.trim()) return;
-        setLlmLoading(true);
-        setLlmAnswer('');
-        try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/review/${documentId}/ask-llm`, {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({ content_id: clause.content_id, question }),
-            });
-            const data = await res.json();
-            setLlmAnswer(data.answer || data.detail || 'No response');
-        } catch (err) {
-            setLlmAnswer('⚠️ Connection error');
-        } finally {
-            setLlmLoading(false);
-        }
-    };
-
-    return (
-        <div className={`clause-review-card risk-${rc.class} status-${status}`}>
-
-            {/* Header row */}
-            <div className="card-header-row">
-                <span
-                    className="clause-type-tag"
-                    style={{ background: `${color}22`, color, border: `1px solid ${color}44` }}
-                >
-                    {clause.clause_type || 'Other'}
-                </span>
-
-                <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-                    <span className={`risk-badge ${rc.class}`}>
-                        {rc.icon} {risk} Risk
-                    </span>
-                    {status !== 'pending' && (
-                        <span className={`status-chip ${status}`}>
-                            {status === 'accepted' ? '✓ Accepted' : '✗ Rejected'}
-                        </span>
-                    )}
-                </div>
-            </div>
-
-            {/* Clause content */}
-            <div>
-                <p className={`clause-content-text ${expanded ? 'expanded' : ''}`}>
-                    {clause.content}
-                </p>
-                {clause.content && clause.content.length > 300 && (
-                    <button className="btn-toggle-expand" onClick={() => setExpanded(e => !e)}>
-                        {expanded ? 'Show less ↑' : 'Show more ↓'}
-                    </button>
-                )}
-            </div>
-
-            {/* Matched standard clause */}
-            {clause.matched_clause && (
-                <div className="matched-clause-box">
-                    <div className="matched-clause-label">
-                        🔗 Matched Standard Clause — {clause.matched_clause.document_type || 'Template'}
-                    </div>
-                    <p className="matched-clause-text">
-                        {clause.matched_clause.content || 'No content available'}
-                    </p>
-                    {score !== null && score !== undefined && (
-                        <div className="similarity-bar-row">
-                            <div className="similarity-bar-wrap">
-                                <div
-                                    className="similarity-bar-fill"
-                                    style={{
-                                        width: `${Math.round(score * 100)}%`,
-                                        background: rc.barColor,
-                                    }}
-                                />
-                            </div>
-                            <span className="similarity-score-text" style={{ color: rc.barColor }}>
-                                {Math.round(score * 100)}% similar
-                            </span>
-                        </div>
-                    )}
-                </div>
-            )}
-
-            {/* Action buttons */}
-            <div className="card-actions">
-                <button
-                    className="btn-accept"
-                    onClick={() => handleAction('accept')}
-                    disabled={actionLoading || status !== 'pending'}
-                >
-                    ✅ Accept
-                </button>
-                <button
-                    className="btn-reject"
-                    onClick={() => handleAction('reject')}
-                    disabled={actionLoading || status !== 'pending'}
-                >
-                    ❌ Reject
-                </button>
-                <button
-                    className="btn-ask-llm"
-                    onClick={() => setLlmOpen(o => !o)}
-                >
-                    💬 Ask LLM
-                </button>
-            </div>
-
-            {/* LLM panel */}
-            {llmOpen && (
-                <div className="llm-panel">
-                    <textarea
-                        placeholder="Ask about this clause… e.g. What are the risks? Is this standard?"
-                        value={question}
-                        onChange={e => setQuestion(e.target.value)}
-                        rows={3}
-                    />
-                    <button
-                        className="btn-submit-llm"
-                        onClick={handleAskLLM}
-                        disabled={llmLoading || !question.trim()}
-                    >
-                        {llmLoading ? 'Thinking…' : 'Ask →'}
-                    </button>
-                    {llmAnswer && (
-                        <div className="llm-answer">{llmAnswer}</div>
-                    )}
-                </div>
-            )}
-        </div>
-    );
-}
-
-
-/* ── Main page ───────────────────────────────────────────────── */
 export default function ClauseReview({ user, onLogout }) {
     const { documentId } = useParams();
     const navigate = useNavigate();
@@ -210,6 +43,22 @@ export default function ClauseReview({ user, onLogout }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [activeTab, setActiveTab] = useState('All');
+
+    // Master-Detail State
+    const [selectedClauseId, setSelectedClauseId] = useState(null);
+
+    // Edit & Comment States
+    const [isEditing, setIsEditing] = useState(false);
+    const [editValue, setEditValue] = useState('');
+    const [isCommenting, setIsCommenting] = useState(false);
+    const [commentValue, setCommentValue] = useState('');
+
+    // Action Loading states
+    const [actionLoading, setActionLoading] = useState(false);
+
+    // LLM State
+    const [llmLoading, setLlmLoading] = useState(false);
+    const [llmAnswer, setLlmAnswer] = useState('');
 
     const fetchReview = async () => {
         try {
@@ -220,6 +69,7 @@ export default function ClauseReview({ user, onLogout }) {
             const result = await res.json();
             if (res.ok) {
                 setData(result);
+                return result.status; // Return status for polling decision
             } else {
                 setError(result.detail || 'Failed to load review');
             }
@@ -228,9 +78,26 @@ export default function ClauseReview({ user, onLogout }) {
         } finally {
             setLoading(false);
         }
+        return null;
     };
 
-    useEffect(() => { fetchReview(); }, [documentId]);
+    useEffect(() => {
+        let pollTimer = null;
+
+        const poll = async () => {
+            const status = await fetchReview();
+            // Keep polling every 5s if still processing
+            if (status === 'processing') {
+                pollTimer = setTimeout(poll, 5000);
+            }
+        };
+
+        poll(); // Initial fetch
+
+        return () => {
+            if (pollTimer) clearTimeout(pollTimer); // Cleanup on unmount
+        };
+    }, [documentId]);
 
     if (loading) {
         return (
@@ -261,7 +128,7 @@ export default function ClauseReview({ user, onLogout }) {
 
     // Risk summary counts
     const counts = clauses.reduce((acc, c) => {
-        const r = c.risk || 'High';
+        const r = normalizeRisk(c.risk);
         acc[r] = (acc[r] || 0) + 1;
         return acc;
     }, {});
@@ -269,115 +136,322 @@ export default function ClauseReview({ user, onLogout }) {
     // Filtered clauses
     const filteredClauses = clauses.filter(c => {
         if (activeTab === 'All') return true;
-        const r = c.risk || 'High';
-        return r === activeTab;
+        return normalizeRisk(c.risk) === activeTab;
     });
+
+    // Currently selected clause object
+    const selectedClause = filteredClauses.find(c => c.content_id === selectedClauseId) || filteredClauses[0];
+
+    // Force selection of first available item if selected isn't in filtered list
+    if (selectedClauseId && !filteredClauses.find(c => c.content_id === selectedClauseId) && filteredClauses.length > 0) {
+        setSelectedClauseId(filteredClauses[0].content_id);
+    }
+
+    // --- Actions ---
+
+    const handleAction = async (actionStr) => {
+        if (!selectedClause) return;
+        setActionLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            await fetch(`${API_URL}/api/documents/review/${documentId}/action`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content_id: selectedClause.content_id, action: actionStr }),
+            });
+            await fetchReview();
+        } catch (err) {
+            console.error('Action error', err);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const saveEdit = async () => {
+        if (!selectedClause) return;
+        setActionLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            await fetch(`${API_URL}/api/documents/review/${documentId}/edit`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content_id: selectedClause.content_id, edited_content: editValue }),
+            });
+            await fetchReview();
+            setIsEditing(false);
+        } catch (err) {
+            console.error('Edit error', err);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const saveComment = async () => {
+        if (!selectedClause) return;
+        setActionLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            await fetch(`${API_URL}/api/documents/review/${documentId}/comment`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content_id: selectedClause.content_id, comment: commentValue }),
+            });
+            await fetchReview();
+            setIsCommenting(false);
+        } catch (err) {
+            console.error('Comment error', err);
+        } finally {
+            setActionLoading(false);
+        }
+    };
+
+    const handleAskLLM = async () => {
+        if (!selectedClause) return;
+        setLlmLoading(true);
+        setLlmAnswer('');
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/documents/review/${documentId}/ask-llm`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    content_id: selectedClause.content_id,
+                    question: 'Please analyze the risks and key differences of this client clause compared to a standard template, and suggest how it could be made more favorable.'
+                }),
+            });
+            const d = await res.json();
+            setLlmAnswer(d.answer || d.detail || 'No response');
+        } catch (err) {
+            setLlmAnswer('⚠️ Connection error');
+        } finally {
+            setLlmLoading(false);
+        }
+    };
+
+    // --- Render Helpers ---
+
+    // A simple diff renderer highlighting additions in red
+    const renderDiffText = (originalText, currentText) => {
+        if (!currentText || currentText === originalText) {
+            return <span>{originalText}</span>;
+        }
+        return (
+            <span>
+                <span style={{ color: '#ef4444', fontWeight: '500' }}>[EDITED] </span>
+                <span dangerouslySetInnerHTML={{ __html: currentText.replace(/\n/g, '<br/>') }} />
+            </span>
+        );
+    };
 
     return (
         <Layout user={user} onLogout={onLogout} pageTitle="Clause Review">
-            <div className="review-page">
+            <div className="review-page master-detail-mode">
 
-                {/* Header */}
-                <div className="review-header">
-                    <button className="btn-back-review" onClick={() => navigate(-1)}>
-                        ← Back
-                    </button>
-                    <h1>Contract Clause Review</h1>
-                    {isProcessing && (
-                        <span className="risk-pill medium">⏳ Analysis in progress…</span>
-                    )}
-                </div>
+                {/* Header & Global Tab Filters */}
+                <div className="md-header">
+                    <button className="md-btn-back" onClick={() => navigate(-1)}>← Back</button>
+                    <h2>Contract Clause Review</h2>
 
-                {/* Document info bar */}
-                <div className="review-doc-bar">
-                    <div className="info-item">
-                        <span className="info-label">Filename</span>
-                        <span className="info-value">{doc?.filename || '—'}</span>
-                    </div>
-                    <div className="info-item">
-                        <span className="info-label">Type</span>
-                        <span className="info-value">{doc?.document_type || '—'}</span>
-                    </div>
-                    <div className="info-item">
-                        <span className="info-label">Uploaded</span>
-                        <span className="info-value">
-                            {doc?.uploaded_at ? new Date(doc.uploaded_at).toLocaleDateString() : '—'}
-                        </span>
-                    </div>
-                    <div className="info-item">
-                        <span className="info-label">Clauses</span>
-                        <span className="info-value">{clauses.length}</span>
-                    </div>
-                </div>
-
-                {/* Risk Tab Filters */}
-                {clauses.length > 0 && (
-                    <div className="risk-tabs" style={{ display: 'flex', gap: '0.8rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
-                        <button
-                            className={`risk-tab-btn ${activeTab === 'All' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('All')}
-                            style={{ padding: '0.5rem 1rem', borderRadius: '999px', border: '1px solid #334155', background: activeTab === 'All' ? '#334155' : 'transparent', color: 'white', cursor: 'pointer' }}
-                        >
+                    <div className="md-risk-tabs">
+                        <button className={`tab-btn ${activeTab === 'All' ? 'active' : ''}`} onClick={() => setActiveTab('All')}>
                             All ({clauses.length})
                         </button>
-                        {counts.High > 0 && (
-                            <button
-                                className={`risk-tab-btn high ${activeTab === 'High' ? 'active' : ''}`}
-                                onClick={() => setActiveTab('High')}
-                                style={{ padding: '0.5rem 1rem', borderRadius: '999px', border: '1px solid #ef4444', background: activeTab === 'High' ? '#ef444422' : 'transparent', color: '#ef4444', cursor: 'pointer' }}
-                            >
-                                🔴 High Risk ({counts.High})
-                            </button>
-                        )}
-                        {counts.Medium > 0 && (
-                            <button
-                                className={`risk-tab-btn medium ${activeTab === 'Medium' ? 'active' : ''}`}
-                                onClick={() => setActiveTab('Medium')}
-                                style={{ padding: '0.5rem 1rem', borderRadius: '999px', border: '1px solid #f59e0b', background: activeTab === 'Medium' ? '#f59e0b22' : 'transparent', color: '#f59e0b', cursor: 'pointer' }}
-                            >
-                                🟡 Medium Risk ({counts.Medium})
-                            </button>
-                        )}
-                        {counts.Low > 0 && (
-                            <button
-                                className={`risk-tab-btn low ${activeTab === 'Low' ? 'active' : ''}`}
-                                onClick={() => setActiveTab('Low')}
-                                style={{ padding: '0.5rem 1rem', borderRadius: '999px', border: '1px solid #10b981', background: activeTab === 'Low' ? '#10b98122' : 'transparent', color: '#10b981', cursor: 'pointer' }}
-                            >
-                                🟢 Low Risk ({counts.Low})
-                            </button>
-                        )}
+                        {counts.High > 0 && <button className={`tab-btn high ${activeTab === 'High' ? 'active' : ''}`} onClick={() => setActiveTab('High')}>⊗ High Risk ({counts.High})</button>}
+                        {counts.Medium > 0 && <button className={`tab-btn medium ${activeTab === 'Medium' ? 'active' : ''}`} onClick={() => setActiveTab('Medium')}>⚠ Medium Risk ({counts.Medium})</button>}
+                        {counts.Low > 0 && <button className={`tab-btn low ${activeTab === 'Low' ? 'active' : ''}`} onClick={() => setActiveTab('Low')}>✓ Low Risk ({counts.Low})</button>}
                     </div>
-                )}
+                </div>
 
-                {/* Clause grid */}
-                {clauses.length === 0 ? (
-                    <div className="review-processing">
-                        <div className="spinner" />
-                        <p>
-                            {isProcessing
-                                ? 'AI is analysing the document. Check back in a few seconds.'
-                                : 'No clauses found in this document.'}
-                        </p>
+                <div className="md-layout">
+                    {/* Left Sidebar Navigation */}
+                    <div className="md-sidebar">
+                        <h3 className="sidebar-title">Clauses</h3>
+                        {filteredClauses.length === 0 ? (
+                            <div className="sidebar-empty">No clauses match.</div>
+                        ) : (
+                            <div className="sidebar-list">
+                                {filteredClauses.map(c => {
+                                    const r = normalizeRisk(c.risk);
+                                    const rc = RISK_CONFIG[r];
+                                    const isSelected = selectedClause && selectedClause.content_id === c.content_id;
+                                    return (
+                                        <div
+                                            key={c.content_id}
+                                            className={`sidebar-item ${isSelected ? 'selected' : ''} risk-${rc.class}`}
+                                            onClick={() => {
+                                                setSelectedClauseId(c.content_id);
+                                                setLlmAnswer('');
+                                                setIsEditing(false);
+                                                setIsCommenting(false);
+                                            }}
+                                        >
+                                            <div className="item-lhs">
+                                                <div className="item-title">{c.clause_type}</div>
+                                                <div className="item-meta">Page {c.page_number}</div>
+                                            </div>
+                                            <div className={`item-risk-pill ${rc.class}`}>
+                                                {r} Risk
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        )}
                     </div>
-                ) : filteredClauses.length === 0 ? (
-                    <div className="review-processing">
-                        <p>No clauses match the {activeTab} risk filter.</p>
-                    </div>
-                ) : (
-                    <div className="review-grid">
-                        {filteredClauses.map((clause, idx) => (
-                            <ClauseCard
-                                key={clause.content_id || idx}
-                                clause={clause}
-                                documentId={documentId}
-                                onActionDone={fetchReview}
-                            />
-                        ))}
-                    </div>
-                )}
 
-                {/* Floating Chat Assistant */}
+                    {/* Right Detail Pane */}
+                    <div className="md-detail">
+                        {!selectedClause ? (
+                            <div className="detail-empty">Select a clause from the sidebar to begin review.</div>
+                        ) : (
+                            <div className={`detail-card risk-${RISK_CONFIG[normalizeRisk(selectedClause.risk || 'High')].class}`}>
+
+                                {/* Detail Header */}
+                                <div className="detail-header">
+                                    <div>
+                                        <h3>{selectedClause.clause_type}</h3>
+                                        <span className="detail-meta">Page {selectedClause.page_number}</span>
+                                    </div>
+                                    <div className="detail-status-area">
+                                        <span className={`detail-risk-pill ${RISK_CONFIG[normalizeRisk(selectedClause.risk || 'High')].class}`}>
+                                            {normalizeRisk(selectedClause.risk)} Risk
+                                        </span>
+                                        {selectedClause.similarity_score !== null && (
+                                            <span className="detail-confidence">
+                                                {Math.round(selectedClause.similarity_score * 100)}% match
+                                            </span>
+                                        )}
+                                        {selectedClause.status === 'accepted' && (
+                                            <span className="detail-approved-badge">✓ Approved</span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Comparison Panes */}
+                                <div className="comparison-box">
+
+                                    {/* Left: Client Contract */}
+                                    <div className="comp-pane upload-pane">
+                                        <div className="pane-title">📄 Uploaded Contract</div>
+                                        <div className="pane-content">
+                                            {isEditing ? (
+                                                <div className="edit-mode-container">
+                                                    <textarea
+                                                        className="edit-textarea"
+                                                        value={editValue}
+                                                        onChange={e => setEditValue(e.target.value)}
+                                                        rows={6}
+                                                    />
+                                                    <div className="edit-actions">
+                                                        <button className="btn-save btn-small" onClick={saveEdit}>Save Edit</button>
+                                                        <button className="btn-cancel btn-small" onClick={() => setIsEditing(false)}>Cancel</button>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <div className="text-display">
+                                                    {renderDiffText(selectedClause.content, selectedClause.edited_content || selectedClause.content)}
+                                                </div>
+                                            )}
+                                        </div>
+                                        {selectedClause.comment && !isCommenting && (
+                                            <div className="clause-comment-display">
+                                                <strong>Notes:</strong> {selectedClause.comment}
+                                            </div>
+                                        )}
+                                        {isCommenting && (
+                                            <div className="comment-mode-container">
+                                                <input
+                                                    type="text"
+                                                    className="comment-input"
+                                                    value={commentValue}
+                                                    onChange={e => setCommentValue(e.target.value)}
+                                                    placeholder="Type a comment..."
+                                                />
+                                                <div className="edit-actions">
+                                                    <button className="btn-save btn-small" onClick={saveComment}>Save</button>
+                                                    <button className="btn-cancel btn-small" onClick={() => setIsCommenting(false)}>Cancel</button>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </div>
+
+                                    {/* Right: Standard Clause */}
+                                    <div className="comp-pane standard-pane">
+                                        <div className="pane-title">📄 Standard Clause</div>
+                                        <div className="pane-content">
+                                            {selectedClause.matched_clause?.content || "No matching standard clause found via SBERT."}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                {/* LLM Differences Box */}
+                                <div className="differences-box">
+                                    <div className="diff-header">
+                                        <span className="diff-title">✨ AI Analysis & Differences</span>
+                                        {!llmAnswer && !llmLoading && (
+                                            <button className="btn-ask-llm-small" onClick={handleAskLLM}>
+                                                Run Analysis
+                                            </button>
+                                        )}
+                                    </div>
+                                    <div className="diff-content">
+                                        {llmLoading ? (
+                                            <div className="spinner-small" />
+                                        ) : llmAnswer ? (
+                                            <p>{llmAnswer}</p>
+                                        ) : selectedClause.llm_reasoning ? (
+                                            <p>{selectedClause.llm_reasoning}</p>
+                                        ) : (
+                                            <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>
+                                                Click "Run Analysis" to generate an on-demand AI assessment of risks and deviations.
+                                            </span>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Bottom Action Bar */}
+                                <div className="detail-actions">
+                                    <div className="left-actions">
+                                        <button
+                                            className="btn-action btn-comment"
+                                            onClick={() => {
+                                                setCommentValue(selectedClause.comment || '');
+                                                setIsCommenting(true);
+                                                setIsEditing(false);
+                                            }}
+                                            disabled={actionLoading}
+                                        >
+                                            💬 Comment
+                                        </button>
+                                        <button
+                                            className="btn-action btn-edit"
+                                            onClick={() => {
+                                                setEditValue(selectedClause.edited_content || selectedClause.content);
+                                                setIsEditing(true);
+                                                setIsCommenting(false);
+                                            }}
+                                            disabled={actionLoading}
+                                        >
+                                            ✏️ Edit
+                                        </button>
+                                    </div>
+                                    <div className="right-actions">
+                                        {/* Reject explicitly removed by User Request */}
+                                        <button
+                                            className="btn-action btn-approve"
+                                            onClick={() => handleAction('accept')}
+                                            disabled={actionLoading || selectedClause.status === 'accepted'}
+                                        >
+                                            ✓ Approve
+                                        </button>
+                                    </div>
+                                </div>
+
+                            </div>
+                        )}
+                    </div>
+                </div>
+
                 <DocumentChatbot documentId={documentId} />
             </div>
         </Layout>

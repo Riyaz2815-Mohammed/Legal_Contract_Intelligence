@@ -1,4 +1,9 @@
 import json
+import langchain  # Compatibility patch: langchain 1.x removed these module-level attributes
+if not hasattr(langchain, 'verbose'):   langchain.verbose = False
+if not hasattr(langchain, 'debug'):     langchain.debug = False
+if not hasattr(langchain, 'llm_cache'): langchain.llm_cache = None
+
 from langchain_mistralai import ChatMistralAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool

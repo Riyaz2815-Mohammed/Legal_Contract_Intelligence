@@ -159,10 +159,14 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, c
                                         {doc.document_type !== 'Redlined' && (
                                             <button
                                                 className="btn-action btn-review"
-                                                onClick={() => navigate(`/analysis/${doc.id}`)}
-                                                title="View AI Analysis"
+                                                onClick={() => navigate(
+                                                    isAdmin
+                                                        ? `/review/${doc.id}`      // Legal/Admin → Master-Detail Review
+                                                        : `/analysis/${doc.id}`    // Client → Simple Analysis view
+                                                )}
+                                                title={isAdmin ? "Review Clauses (SBERT + AI)" : "View AI Analysis"}
                                             >
-                                                Review
+                                                {isAdmin ? '🔍 Review' : 'View'}
                                             </button>
                                         )}
                                     </div>

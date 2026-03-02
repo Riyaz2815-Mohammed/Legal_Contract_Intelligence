@@ -12,6 +12,8 @@ const DocumentAnalysis = ({ user, onLogout }) => {
     const [error, setError] = useState(null);
 
     useEffect(() => {
+        let pollTimer = null;
+
         const fetchAnalysis = async () => {
             try {
                 const token = localStorage.getItem('token');
@@ -21,6 +23,10 @@ const DocumentAnalysis = ({ user, onLogout }) => {
                 const result = await response.json();
                 if (response.ok) {
                     setData(result);
+                    // Keep polling if still processing
+                    if (result.status === 'processing') {
+                        pollTimer = setTimeout(fetchAnalysis, 5000);
+                    }
                 } else {
                     const errorDetail = result.detail;
                     setError(typeof errorDetail === 'string' ? errorDetail : JSON.stringify(errorDetail || 'Failed to load analysis'));
@@ -34,6 +40,8 @@ const DocumentAnalysis = ({ user, onLogout }) => {
         };
 
         fetchAnalysis();
+
+        return () => { if (pollTimer) clearTimeout(pollTimer); };
     }, [documentId]);
 
     const getClauseTypeColor = (type) => {

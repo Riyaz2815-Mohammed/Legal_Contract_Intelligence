@@ -671,6 +671,23 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                     
                     # Only analyze clauses with meaningful text
                     if len(client_text.strip()) > 10:
+                        
+                        # Skip SBERT pipeline for structural blocks that have no standard equivalent
+                        if clause_type in ("Header", "Other"):
+                            final_reviews.append({
+                                "content_id": clause.get("content_id"),
+                                "clause_id": clause.get("clause_id"),
+                                "clause_type": clause_type,
+                                "content": client_text,
+                                "page_number": clause.get("page_number", 1),
+                                "risk": "low",
+                                "similarity_score": None,
+                                "matched_clause": None,
+                                "llm_reasoning": None,
+                                "status": "pending"
+                            })
+                            continue
+                        
                         # Run pipeline: retrieves top K similar standard clauses, scores them, tags risk, runs LLM if high risk
                         pipeline_results = run_pipeline(
                             query_text=client_text, 
@@ -1447,16 +1464,24 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
                         clauses = json.load(f)
                         
             if clauses is not None:
-                # Fetch live approval statuses from DB
-                cur.execute("SELECT content_id, approval_status FROM clauses WHERE document_id = %s", (document_id,))
-                status_map = {row[0]: row[1] for row in cur.fetchall()}
+                # Fetch live statuses, edits, and comments from DB
+                cur.execute("SELECT content_id, approval_status, edited_content, comment FROM clauses WHERE document_id = %s", (document_id,))
+                status_map = {}
+                for row in cur.fetchall():
+                    status_map[row[0]] = {
+                        "status": row[1],
+                        "edited_content": row[2],
+                        "comment": row[3]
+                    }
                 
-                # Apply live statuses to the JSON payload
+                # Apply live overrides to the JSON payload
                 for clause in clauses:
                     cid = clause.get("content_id")
                     if cid and cid in status_map:
-                        # Use the live DB status, default to pending if missing
-                        clause["status"] = status_map[cid] or "pending" 
+                        db_vals = status_map[cid]
+                        clause["status"] = db_vals["status"] or "pending" 
+                        clause["edited_content"] = db_vals["edited_content"]
+                        clause["comment"] = db_vals["comment"]
                         
                 return {"clauses": clauses, "status": "complete"}
             
@@ -1528,6 +1553,102 @@ def clause_action(document_id: str, req: ClauseActionRequest, current_user: dict
 
 
 
+class ClauseEditRequest(BaseModel):
+    content_id: str
+    edited_content: str
+
+@app.post("/api/documents/review/{document_id}/edit")
+def update_clause_content(document_id: str, req: ClauseEditRequest, current_user: dict = Depends(verify_token)):
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM documents WHERE id = %s", (document_id,))
+            doc = cur.fetchone()
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            if current_user["role"] == "client" and doc[0] != current_user["user_id"]:
+                raise HTTPException(status_code=403, detail="Forbidden")
+
+        updated = False
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE clauses SET edited_content = %s WHERE content_id = %s RETURNING id",
+                    (req.edited_content, req.content_id)
+                )
+                if cur.fetchone():
+                    updated = True
+            conn.commit()
+        except Exception as e:
+            print(f"[ERROR] DB update failed for clause edit: {e}")
+            conn.rollback()
+            raise HTTPException(status_code=500, detail="Database error during edit")
+            
+        if not updated:
+            raise HTTPException(status_code=404, detail="Clause not found in database")
+
+        return {"message": "Clause edited successfully", "content_id": req.content_id}
+    except HTTPException: raise
+    except Exception as e:
+        print(f"[ERROR] Clause edit error: {e}")
+        raise HTTPException(status_code=500, detail="Processing error")
+    finally:
+        if conn: db_pool.putconn(conn)
+
+
+class ClauseCommentRequest(BaseModel):
+    content_id: str
+    comment: str
+
+@app.post("/api/documents/review/{document_id}/comment")
+def update_clause_comment(document_id: str, req: ClauseCommentRequest, current_user: dict = Depends(verify_token)):
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT user_id FROM documents WHERE id = %s", (document_id,))
+            doc = cur.fetchone()
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            if current_user["role"] == "client" and doc[0] != current_user["user_id"]:
+                raise HTTPException(status_code=403, detail="Forbidden")
+
+        updated = False
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE clauses SET comment = %s WHERE content_id = %s RETURNING id",
+                    (req.comment, req.content_id)
+                )
+                if cur.fetchone():
+                    updated = True
+            conn.commit()
+        except Exception as e:
+            print(f"[ERROR] DB update failed for clause comment: {e}")
+            conn.rollback()
+            raise HTTPException(status_code=500, detail="Database error during comment")
+            
+        if not updated:
+            raise HTTPException(status_code=404, detail="Clause not found in database")
+
+        return {"message": "Clause comment added successfully", "content_id": req.content_id}
+    except HTTPException: raise
+    except Exception as e:
+        print(f"[ERROR] Clause comment error: {e}")
+        raise HTTPException(status_code=500, detail="Processing error")
+    finally:
+        if conn: db_pool.putconn(conn)
+
+
 class AskLLMRequest(BaseModel):
     content_id: str
     question: str
@@ -1540,36 +1661,46 @@ def ask_llm_about_clause(
     current_user: dict = Depends(verify_token)
 ):
     """Ask the LLM a question about a specific clause in the review."""
-    reviews_dir = DATA_DIR / "reviews"
-    review_path = reviews_dir / f"{document_id}.json"
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
 
-    if not review_path.exists():
-        raise HTTPException(status_code=404, detail="Review not available yet")
-
-    with open(review_path, "r", encoding="utf-8") as f:
-        clauses = json.load(f)
+    conn = None
+    clauses = []
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT review_data FROM document_reviews WHERE document_id = %s", (document_id,))
+            db_review = cur.fetchone()
+            if db_review:
+                clauses = db_review[0]
+            else:
+                # Fallback to local file if DB isn't populated for this document yet
+                reviews_dir = DATA_DIR / "reviews"
+                review_path = reviews_dir / f"{document_id}.json"
+                if review_path.exists():
+                    with open(review_path, "r", encoding="utf-8") as f:
+                        clauses = json.load(f)
+                else:
+                    raise HTTPException(status_code=404, detail="Review not available yet for this document")
+    finally:
+        if conn: db_pool.putconn(conn)
 
     # Find the specific clause the user clicked on
     clause = next((c for c in clauses if c.get("content_id") == req.content_id), None)
     if not clause:
-        raise HTTPException(status_code=404, detail="Clause not found")
+        raise HTTPException(status_code=404, detail="Clause not found in review payload")
 
     try:
-        from vector_pipeline.llm.reasoning import get_llm
-        from langchain_core.messages import HumanMessage
-        
-        # Build an ad-hoc prompt to ask Mistral about this specific clause
-        llm = get_llm()
-        prompt = (
-            f"You are a legal AI assistant. The user is reviewing a clause categorized as: '{clause.get('clause', 'Unknown')}'.\n\n"
-            f"Clause Text: {clause.get('content', '')}\n\n"
-            f"User Question: {req.question}\n\n"
-            f"Answer the user's question directly, concisely, and based ONLY on the legal clause text provided above."
-        )
-        
-        response = llm.invoke([HumanMessage(content=prompt)])
-        return {"answer": response.content, "content_id": req.content_id}
-        
+        from vector_pipeline.llm.reasoning import compare_clauses
+
+        client_text   = clause.get("content", "")
+        standard_text = (clause.get("matched_clause") or {}).get("content", "")
+        clause_type   = clause.get("clause_type", "Unknown")
+        risk          = clause.get("risk", "Unknown")
+
+        answer = compare_clauses(client_text, standard_text, clause_type, risk)
+        return {"answer": answer, "content_id": req.content_id}
+
     except Exception as e:
         import traceback
         traceback.print_exc()

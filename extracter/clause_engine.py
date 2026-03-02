@@ -50,6 +50,45 @@ def classify_clause(text: str) -> str:
     text_clean = text.strip()
     text_lower = text_clean.lower()
     
+    # Priority 0: Header / Preamble Detection
+    # Catch agreement intro, company details, parties, witness clauses etc.
+    header_keywords = [
+        r"non.?disclosure agreement",
+        r"non.?disclosure",
+        r"this agreement is entered into",
+        r"this agreement shall",
+        r"entered into as of",
+        r"by and between",
+        r"witnesseth",
+        r"now, therefore",
+        r"in witness whereof",
+        r"preamble",
+        r"recitals",
+        r"agreement date",
+        r"effective date",
+        r"this .{0,50} agreement",
+        r"name:\s*m/s",
+        r"address:",
+        r"referrer\)\s*and",
+        r"solution provider\)",
+        r"parties hereto",
+        r"witnesseth as follows",
+        r"sign here",
+        r"print name",
+        r"designation",
+        r"on behalf of",
+        r"for and on behalf",
+        r"\bpreamble\b"
+    ]
+    # Also catch if the heading itself is 'Preamble'
+    if text_lower.startswith('preamble') or text_lower.startswith('non-disclosure') or text_lower.startswith('non\u2013disclosure'):
+        return "Header"
+        
+    # Score header keywords
+    header_score = sum(1 for pat in header_keywords if re.search(pat, text_lower))
+    if header_score >= 2:  # Multiple header signals = definitely a header block
+        return "Header"
+
     # Priority 1: Check if the text starts with a specific section header
     header_logic = {
         "Purpose": [r"purpose", r"background", r"recitals", r"engagement"],
@@ -64,8 +103,8 @@ def classify_clause(text: str) -> str:
         "Indemnity": [r"indemnification", r"indemnity"],
         "Limitation of Liability": [r"limitation of liability", r"liability limit"],
         "Force Majeure": [r"force majeure", r"act of god"],
-        "Term": [r"term", r"duration", r"commencement"],
-        "Termination": [r"termination", r"effect of termination"],
+        "Termination": [r"termination", r"effect of termination"],   # MUST be before 'Term'
+        "Term": [r"\bterm\b", r"duration", r"commencement"],         # \bterm\b avoids matching 'termination'
         "Assignment": [r"assignment", r"transfer"],
         "Notices": [r"notices", r"communications"],
         "Severability": [r"severability"],
@@ -95,7 +134,8 @@ def classify_clause(text: str) -> str:
         "Indemnity": ["indemnify", "indemnification", "hold harmless", "defend", "liable"],
         "Limitation of Liability": ["limitation of liability", "cap on liability", "consequential damages", "indirect damages", "maximum liability"],
         "Warranty": ["warrant", "warranty", "representation", "merchantability", "fitness for a particular purpose", "as is"],
-        "Termination": ["terminate", "termination", "cancellation", "expiration", "survival", "breach"],
+        "Termination": ["terminate", "termination", "cancellation", "expiration", "survival", "breach"],  # before Term
+        "Term": ["duration", "commencement", "effective date", "renewal", "in force"],  # removed bare 'term' to avoid substring match
         "Payment Terms": ["payment", "invoice", "fees", "taxes", "billing", "compensation"],
         "Service Levels (SLA)": ["service level", "sla", "uptime", "downtime", "credit", "support", "maintenance"],
         "Governing Law": ["governing law", "jurisdiction", "venue", "dispute resolution", "arbitration", "courts"],
@@ -107,7 +147,6 @@ def classify_clause(text: str) -> str:
         "Notices": ["notices", "written notice", "communication"],
         "Severability": ["severability", "invalidity", "enforceability"],
         "Entire Agreement": ["entire agreement", "supersedes", "integration", "prior agreements"],
-        "Term": ["term", "duration", "commencement", "effective date", "renewal"],
         "Purpose": ["purpose", "engagement", "scope", "services"],
         "Relationship": ["independent contractor", "relationship of the parties", "employment", "agency", "partnership"]
     }
