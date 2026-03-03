@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../layouts/Layout';
 import DocumentChatbot from '../components/DocumentChatbot';
@@ -60,7 +60,7 @@ export default function ClauseReview({ user, onLogout }) {
     const [llmLoading, setLlmLoading] = useState(false);
     const [llmAnswer, setLlmAnswer] = useState('');
 
-    const fetchReview = async () => {
+    const fetchReview = useCallback(async () => {
         try {
             const token = localStorage.getItem('token');
             const res = await fetch(`${API_URL}/api/documents/review/${documentId}`, {
@@ -79,15 +79,58 @@ export default function ClauseReview({ user, onLogout }) {
             setLoading(false);
         }
         return null;
-    };
+    }, [documentId]);
+
+    const isPollingRef = React.useRef(false);
+
+    // Risk summary counts
+    const counts = useMemo(() => {
+        const clauses = data?.clauses || [];
+        return clauses.reduce((acc, c) => {
+            const r = normalizeRisk(c.risk);
+            acc[r] = (acc[r] || 0) + 1;
+            return acc;
+        }, {});
+    }, [data]);
+
+    // Filtered clauses
+    const filteredClauses = useMemo(() => {
+        const clauses = data?.clauses || [];
+        return clauses.filter(c => {
+            if (activeTab === 'All') return true;
+            return normalizeRisk(c.risk) === activeTab;
+        });
+    }, [data, activeTab]);
+
+    // Currently selected clause object
+    const selectedClause = useMemo(() => {
+        return filteredClauses.find(c => c.content_id === selectedClauseId) || filteredClauses[0];
+    }, [filteredClauses, selectedClauseId]);
+
+    // Force selection of first available item if selected isn't in filtered list
+    useEffect(() => {
+        if (filteredClauses.length > 0 && selectedClauseId) {
+            const exists = filteredClauses.some(c => c.content_id === selectedClauseId);
+            if (!exists) {
+                setSelectedClauseId(filteredClauses[0].content_id);
+            }
+        } else if (filteredClauses.length > 0 && !selectedClauseId) {
+            setSelectedClauseId(filteredClauses[0].content_id);
+        }
+    }, [filteredClauses, selectedClauseId]);
 
     useEffect(() => {
+        let isMounted = true;
         let pollTimer = null;
 
         const poll = async () => {
+            if (!isMounted || isPollingRef.current) return;
+            isPollingRef.current = true;
+
             const status = await fetchReview();
-            // Keep polling every 5s while still processing
-            if (status === 'processing') {
+            isPollingRef.current = false;
+
+            if (isMounted && status === 'processing') {
                 pollTimer = setTimeout(poll, 5000);
             }
         };
@@ -95,9 +138,11 @@ export default function ClauseReview({ user, onLogout }) {
         poll();
 
         return () => {
+            isMounted = false;
             if (pollTimer) clearTimeout(pollTimer);
+            isPollingRef.current = false;
         };
-    }, [documentId]);
+    }, [fetchReview]);
 
     if (loading) {
         return (
@@ -123,29 +168,10 @@ export default function ClauseReview({ user, onLogout }) {
         );
     }
 
-    const { document: doc, clauses = [], status } = data;
+    const doc = data?.document;
+    const clauses = data?.clauses || [];
+    const status = data?.status;
     const isProcessing = status === 'processing';
-
-    // Risk summary counts
-    const counts = clauses.reduce((acc, c) => {
-        const r = normalizeRisk(c.risk);
-        acc[r] = (acc[r] || 0) + 1;
-        return acc;
-    }, {});
-
-    // Filtered clauses
-    const filteredClauses = clauses.filter(c => {
-        if (activeTab === 'All') return true;
-        return normalizeRisk(c.risk) === activeTab;
-    });
-
-    // Currently selected clause object
-    const selectedClause = filteredClauses.find(c => c.content_id === selectedClauseId) || filteredClauses[0];
-
-    // Force selection of first available item if selected isn't in filtered list
-    if (selectedClauseId && !filteredClauses.find(c => c.content_id === selectedClauseId) && filteredClauses.length > 0) {
-        setSelectedClauseId(filteredClauses[0].content_id);
-    }
 
     // --- Actions ---
 
