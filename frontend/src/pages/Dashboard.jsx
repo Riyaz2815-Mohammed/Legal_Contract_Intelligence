@@ -19,6 +19,7 @@ function Dashboard({ user, onLogout }) {
     const [clients, setClients] = useState([]);
     const [stats, setStats] = useState({ totalDocs: 0, totalClients: 0, pendingReviews: 0 });
     const [loading, setLoading] = useState(true);
+    const [searchQuery, setSearchQuery] = useState('');
 
     const loadClientsAndStats = async () => {
         try {
@@ -45,6 +46,7 @@ function Dashboard({ user, onLogout }) {
                         d.user_id === client.id || (Array.isArray(d.shared_with) && d.shared_with.includes(client.id))
                     );
                     const pendingCount = clientDocs.filter(d => d.status === 'pending' || d.status === 'uploaded').length;
+                    const finalizedDoc = clientDocs.find(d => d.is_finalized);
 
                     sumTotalDocs += clientDocs.length;
                     sumPendingReviews += pendingCount;
@@ -52,7 +54,8 @@ function Dashboard({ user, onLogout }) {
                     return {
                         ...client,
                         totalDocs: clientDocs.length,
-                        pendingDocs: pendingCount
+                        pendingDocs: pendingCount,
+                        finalizedDocName: finalizedDoc ? finalizedDoc.filename : null
                     };
                 });
 
@@ -103,6 +106,10 @@ function Dashboard({ user, onLogout }) {
         navigate(`/workspace/${client.id}`);
     };
 
+    const filteredClients = clients.filter(client =>
+        client.name.toLowerCase().includes(searchQuery.toLowerCase())
+    );
+
     return (
         <Layout user={user} onLogout={onLogout} pageTitle="Dashboard">
             <div className="dashboard-content-v2">
@@ -124,11 +131,37 @@ function Dashboard({ user, onLogout }) {
                     />
                 </div>
 
-                <div className="section-header" style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div>
+                <div className="section-header" style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+                    <div style={{ flex: '1', minWidth: '200px' }}>
                         <h2>All Clients</h2>
                         <p>Manage and monitor your legal workspaces</p>
                     </div>
+
+                    <div className="search-container" style={{ flex: '1', maxWidth: '400px', position: 'relative' }}>
+                        <input
+                            type="text"
+                            placeholder="Search clients..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            style={{
+                                width: '100%',
+                                padding: '0.75rem 1rem 0.75rem 2.5rem',
+                                borderRadius: '8px',
+                                border: '1px solid #e2e8f0',
+                                outline: 'none',
+                                transition: 'all 0.2s',
+                                fontSize: '0.95rem'
+                            }}
+                            className="search-input"
+                        />
+                        <svg
+                            style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }}
+                            width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"
+                        >
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </div>
+
                     <button className="btn btn-primary" style={{ width: 'auto', padding: '0.75rem 1.5rem', borderRadius: '8px', boxShadow: '0 4px 12px rgba(37,99,235,0.2)' }} onClick={() => navigate('/invite-client')}>
                         Create New Client
                     </button>
@@ -136,7 +169,7 @@ function Dashboard({ user, onLogout }) {
 
                 <div style={{ marginTop: '1rem' }}>
                     <ClientsTable
-                        clients={clients}
+                        clients={filteredClients}
                         loading={loading}
                         onDelete={handleClientDelete}
                         onOpenWorkspace={handleOpenWorkspace}
