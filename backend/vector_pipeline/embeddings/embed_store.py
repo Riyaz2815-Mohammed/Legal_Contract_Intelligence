@@ -99,11 +99,25 @@ def load_vectorstore(embedding_model) -> Chroma:
 
 
 def run_embed_pipeline():
+    """
+    Wipe ChromaDB and re-embed ALL legal clauses from DB.
+    Called automatically after any legal template upload so the vectorstore
+    always reflects the current, correctly-classified clause set.
+    """
+    import shutil
+    from pathlib import Path
+
+    # Wipe stale ChromaDB so old incorrectly-classified blobs don't stick around
+    chroma_path = Path(CHROMA_PERSIST_DIR)
+    if chroma_path.exists():
+        shutil.rmtree(chroma_path)
+        logger.info(f"[Embed] Wiped old ChromaDB at {chroma_path}")
+
     embedding_model = get_embedding_model()
     df = fetch_legal_clauses()
     if df.empty:
         logger.warning("[Embed] No legal clauses in DB — ChromaDB not updated.")
         return
     docs = build_documents(df)
-    embed_and_store(docs, embedding_model)
-    logger.info("✅ Embed pipeline complete")
+    vs = embed_and_store(docs, embedding_model)
+    logger.info(f"✅ Embed pipeline complete — {vs._collection.count()} chunks in ChromaDB")

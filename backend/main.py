@@ -595,30 +595,43 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                     cur.execute("SELECT id FROM documents WHERE s3_key = %s LIMIT 1", (file_name,))
                     doc_res = cur.fetchone()
                     document_id = doc_res[0] if doc_res else None
-                    
-                    # Group clauses by type before insertion
-                    merged_clauses = {}
-                    for clause in results:
-                        ctype = clause.get("clause", "Unknown")
-                        ccontent = clause.get("content", "").strip()
-                        cpage = clause.get("page_number", 1)
-                        
-                        if ctype not in merged_clauses:
-                            merged_clauses[ctype] = {
-                                "clause_id": clause.get("clause_id") or f"CLZ-{uuid.uuid4().hex[:8].upper()}",
-                                "clause": ctype,
+
+                    if source == "legal":
+                        # ── Legal templates: store EACH parsed section individually ──────────
+                        # Do NOT merge by clause type — ChromaDB needs granular, single-section
+                        # embeddings so the clause-type filter in query.py works precisely.
+                        clauses_to_insert = []
+                        for clause in results:
+                            clauses_to_insert.append({
+                                "clause_id":  clause.get("clause_id") or f"CLZ-{uuid.uuid4().hex[:8].upper()}",
+                                "clause":     clause.get("clause", "Unknown"),
                                 "content_id": clause.get("content_id") or f"CNT-{uuid.uuid4().hex[:8].upper()}",
-                                "content": ccontent,
-                                "page_number": cpage
-                            }
-                        else:
-                            # Append to existing clause of the same type
-                            merged_clauses[ctype]["content"] += "\n\n" + ccontent
-                            
-                    # Update results to reflect the merged clauses for the vector pipeline
-                    results = list(merged_clauses.values())
-                    
-                    for clause in results:
+                                "content":    clause.get("content", "").strip(),
+                                "page_number": clause.get("page_number", 1),
+                            })
+                    else:
+                        # ── Client documents: merge same-type clauses into one record ───────
+                        # This gives a single coherent clause block per type for review display.
+                        merged_clauses: dict = {}
+                        for clause in results:
+                            ctype   = clause.get("clause", "Unknown")
+                            ccontent = clause.get("content", "").strip()
+                            cpage   = clause.get("page_number", 1)
+                            if ctype not in merged_clauses:
+                                merged_clauses[ctype] = {
+                                    "clause_id":  clause.get("clause_id") or f"CLZ-{uuid.uuid4().hex[:8].upper()}",
+                                    "clause":     ctype,
+                                    "content_id": clause.get("content_id") or f"CNT-{uuid.uuid4().hex[:8].upper()}",
+                                    "content":    ccontent,
+                                    "page_number": cpage,
+                                }
+                            else:
+                                merged_clauses[ctype]["content"] += "\n\n" + ccontent
+                        clauses_to_insert = list(merged_clauses.values())
+
+                    # Persist to DB
+                    results = clauses_to_insert  # pipeline below iterates this
+                    for clause in clauses_to_insert:
                         cur.execute(
                             """
                             INSERT INTO clauses (clause_id, clause, content_id, content, page_number, document, source, document_id)
@@ -633,7 +646,7 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                                 clause["page_number"],
                                 document_type,
                                 source,
-                                document_id
+                                document_id,
                             )
                         )
                 conn.commit()
@@ -679,7 +692,7 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                         })
                         continue
 
-                    if clause_type in ("Header", "Other"):
+                    if clause_type in ("Other",):
                         final_reviews.append({
                             "content_id": clause.get("content_id"), "clause_id": clause.get("clause_id"),
                             "clause_type": clause_type, "content": client_text,
@@ -702,20 +715,24 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                         best_match = None
 
                     if best_match:
+                        # Override risk for Header to always be Low
+                        final_risk = "Low" if clause_type == "Header" else best_match.get("final_risk", "High")
+                        final_status = "approved" if clause_type == "Header" else "pending"
+                        
                         review_entry = {
                             "content_id":       clause.get("content_id"),
                             "clause_id":        clause.get("clause_id"),
                             "clause_type":      clause_type,
                             "content":          client_text,
                             "page_number":      clause.get("page_number", 1),
-                            "risk":             best_match.get("final_risk", "High"),
+                            "risk":             final_risk,
                             "similarity_score": best_match.get("sbert_similarity"),
                             "matched_clause": {
                                 "content":       best_match.get("template_content"),
                                 "document_type": best_match.get("template_metadata", {}).get("document_type", "Template")
                             },
                             "llm_reasoning":    best_match.get("llm_reasoning"),
-                            "status":           "pending"
+                            "status":           final_status
                         }
                     else:
                         review_entry = {
@@ -724,7 +741,7 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                             "clause_type":      clause_type,
                             "content":          client_text,
                             "page_number":      clause.get("page_number", 1),
-                            "risk":             "High",
+                            "risk":             "Low" if clause_type == "Header" else "High",
                             "similarity_score": 0.0,
                             "matched_clause":   None,
                             "llm_reasoning":    None,
