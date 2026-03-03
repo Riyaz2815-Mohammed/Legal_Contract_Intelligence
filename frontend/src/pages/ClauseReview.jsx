@@ -69,7 +69,7 @@ export default function ClauseReview({ user, onLogout }) {
             const result = await res.json();
             if (res.ok) {
                 setData(result);
-                return result.status; // Return status for polling decision
+                return result.status;
             } else {
                 setError(result.detail || 'Failed to load review');
             }
@@ -86,16 +86,16 @@ export default function ClauseReview({ user, onLogout }) {
 
         const poll = async () => {
             const status = await fetchReview();
-            // Keep polling every 5s if still processing
+            // Keep polling every 5s while still processing
             if (status === 'processing') {
                 pollTimer = setTimeout(poll, 5000);
             }
         };
 
-        poll(); // Initial fetch
+        poll();
 
         return () => {
-            if (pollTimer) clearTimeout(pollTimer); // Cleanup on unmount
+            if (pollTimer) clearTimeout(pollTimer);
         };
     }, [documentId]);
 
@@ -267,7 +267,16 @@ export default function ClauseReview({ user, onLogout }) {
                     <div className="md-sidebar">
                         <h3 className="sidebar-title">Clauses</h3>
                         {filteredClauses.length === 0 ? (
-                            <div className="sidebar-empty">No clauses match.</div>
+                            <div className="sidebar-empty">
+                                {isProcessing ? (
+                                    <div style={{ textAlign: 'center', padding: '1rem' }}>
+                                        <div className="spinner" style={{ margin: '0 auto 0.75rem' }} />
+                                        <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Analysing document…</p>
+                                    </div>
+                                ) : (
+                                    <p>No clauses found.</p>
+                                )}
+                            </div>
                         ) : (
                             <div className="sidebar-list">
                                 {filteredClauses.map(c => {

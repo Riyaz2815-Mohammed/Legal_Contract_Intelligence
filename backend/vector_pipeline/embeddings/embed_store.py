@@ -1,9 +1,8 @@
 import psycopg2
 import pandas as pd
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings   # fixed: langchain_community deprecated
 from langchain_core.documents import Document
-
 
 from vector_pipeline.config.settings import (
     DATABASE_URL,
@@ -17,13 +16,21 @@ from vector_pipeline.config.settings import (
 import logging
 logger = logging.getLogger(__name__)
 
+# ── Module-level model cache so we don't reload on every clause ───────────────
+_embedding_model = None
+
 
 def get_embedding_model():
-    return HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL,
-        model_kwargs={"device": EMBEDDING_DEVICE},
-        encode_kwargs={"normalize_embeddings": EMBEDDING_NORMALIZE}
-    )
+    global _embedding_model
+    if _embedding_model is None:
+        logger.info(f"[Embed] Loading embedding model '{EMBEDDING_MODEL}' …")
+        _embedding_model = HuggingFaceEmbeddings(
+            model_name=EMBEDDING_MODEL,
+            model_kwargs={"device": EMBEDDING_DEVICE},
+            encode_kwargs={"normalize_embeddings": EMBEDDING_NORMALIZE}
+        )
+        logger.info("[Embed] Embedding model loaded.")
+    return _embedding_model
 
 
 def fetch_legal_clauses() -> pd.DataFrame:
@@ -36,7 +43,7 @@ def fetch_legal_clauses() -> pd.DataFrame:
             FROM clauses
             WHERE source = 'legal'
         """, conn)
-        logger.info(f"Fetched {len(df)} legal clauses from Supabase")
+        logger.info(f"Fetched {len(df)} legal clauses from DB")
         return df
     except Exception as e:
         logger.error(f"Error fetching clauses: {e}")
@@ -52,14 +59,14 @@ def build_documents(df: pd.DataFrame) -> list[Document]:
         doc = Document(
             page_content=row["content"],
             metadata={
-                "clause_id": str(row["clause_id"]),
-                "clause": str(row["clause"]),
-                "content_id": str(row["content_id"]),
-                "source": str(row["source"]),
+                "clause_id":   str(row["clause_id"]),
+                "clause":      str(row["clause"]),
+                "content_id":  str(row["content_id"]),
+                "source":      str(row["source"]),
                 "page_number": str(row["page_number"]),
-                "document": str(row["document"]),
+                "document":    str(row["document"]),
                 "document_id": str(row["document_id"]),
-                "created_at": str(row["created_at"])
+                "created_at":  str(row["created_at"])
             }
         )
         docs.append(doc)
@@ -75,7 +82,7 @@ def embed_and_store(docs: list[Document], embedding_model) -> Chroma:
             persist_directory=CHROMA_PERSIST_DIR,
             collection_name=CHROMA_COLLECTION
         )
-        vectorstore.persist()
+        # NOTE: .persist() was removed in ChromaDB ≥ 0.4 — data is auto-persisted
         logger.info("✅ Embedded and stored in ChromaDB")
         return vectorstore
     except Exception as e:
@@ -94,6 +101,9 @@ def load_vectorstore(embedding_model) -> Chroma:
 def run_embed_pipeline():
     embedding_model = get_embedding_model()
     df = fetch_legal_clauses()
+    if df.empty:
+        logger.warning("[Embed] No legal clauses in DB — ChromaDB not updated.")
+        return
     docs = build_documents(df)
     embed_and_store(docs, embedding_model)
     logger.info("✅ Embed pipeline complete")

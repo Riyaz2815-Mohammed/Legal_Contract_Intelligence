@@ -649,135 +649,123 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
                 db_pool.putconn(conn)
                 conn = None # Prevent reuse below
                 
-        # ------ NEW INTEGRATION: Vector Pipeline ------
-        # Run independent of the DB transaction. If this crashes, the clauses are still safely saved!
+        # ------ Vector Pipeline -----------------------------------------------
+        # Runs independently — clauses are already safely in DB before this.
         try:
             if source == "legal":
-                # For standard templates, refresh the ChromaDB so it includes the new clauses
                 from vector_pipeline.embeddings.embed_store import run_embed_pipeline
-                print(f"[INFO] [Background] Document '{file_name}' is a standard template. Updating ChromaDB...")
+                import vector_pipeline.pipeline.full_pipeline as _fp
+                print(f"[INFO] [Background] Standard template '{file_name}' — updating ChromaDB...")
                 run_embed_pipeline()
+                _fp._vectorstore = None  # reset cache so next client doc picks up new templates
                 print(f"[SUCCESS] [Background] ChromaDB updated with new standard template clauses.")
             
             elif source == "client" and document_id:
-                # For client documents, process each clause against the ChromaDB standard templates
                 from vector_pipeline.pipeline.full_pipeline import run_pipeline
-                print(f"[INFO] [Background] Document '{file_name}' is a client document. Running vector review pipeline...")
-                
+                print(f"[INFO] [Background] Client document '{file_name}' — running vector review pipeline...")
+
                 final_reviews = []
                 for clause in results:
                     client_text = clause.get("content", "")
                     clause_type = clause.get("clause", "Unknown")
                     
-                    # Only analyze clauses with meaningful text
-                    if len(client_text.strip()) > 10:
-                        
-                        # Skip SBERT pipeline for structural blocks that have no standard equivalent
-                        if clause_type in ("Header", "Other"):
-                            final_reviews.append({
-                                "content_id": clause.get("content_id"),
-                                "clause_id": clause.get("clause_id"),
-                                "clause_type": clause_type,
-                                "content": client_text,
-                                "page_number": clause.get("page_number", 1),
-                                "risk": "low",
-                                "similarity_score": None,
-                                "matched_clause": None,
-                                "llm_reasoning": None,
-                                "status": "pending"
-                            })
-                            continue
-                        
-                        # Run pipeline: retrieves top K similar standard clauses, scores them, tags risk, runs LLM if high risk
+                    if len(client_text.strip()) <= 10:
+                        final_reviews.append({
+                            "content_id": clause.get("content_id"), "clause_id": clause.get("clause_id"),
+                            "clause_type": clause_type, "content": client_text,
+                            "page_number": clause.get("page_number", 1),
+                            "risk": "Low", "similarity_score": None,
+                            "matched_clause": None, "llm_reasoning": None, "status": "pending"
+                        })
+                        continue
+
+                    if clause_type in ("Header", "Other"):
+                        final_reviews.append({
+                            "content_id": clause.get("content_id"), "clause_id": clause.get("clause_id"),
+                            "clause_type": clause_type, "content": client_text,
+                            "page_number": clause.get("page_number", 1),
+                            "risk": "Low", "similarity_score": None,
+                            "matched_clause": None, "llm_reasoning": None, "status": "pending"
+                        })
+                        continue
+
+                    # Per-clause try so one failure doesn't abort entire review
+                    try:
                         pipeline_results = run_pipeline(
-                            query_text=client_text, 
+                            query_text=client_text,
                             clause_type=clause_type,
                             document_type=document_type
                         )
-                        
-                        # Grab the best match from the pipeline (sorted by similarity desc)
                         best_match = pipeline_results[0] if pipeline_results else None
-                        
-                        # Map backend pipeline results perfectly to exactly what ClauseReview.jsx expects
-                        if best_match:
-                            review_entry = {
-                                "content_id": clause.get("content_id"),
-                                "clause_id": clause.get("clause_id"),
-                                "clause_type": clause_type,
-                                "content": client_text,
-                                "page_number": clause.get("page_number", 1),
-                                "risk": best_match.get("final_risk", "High"),
-                                "similarity_score": best_match.get("sbert_similarity"),
-                                "matched_clause": {
-                                    "content": best_match.get("template_content"),
-                                    "document_type": best_match.get("template_metadata", {}).get("document_type", "Template")
-                                },
-                                "llm_reasoning": best_match.get("llm_reasoning"),
-                                "status": "pending"
-                            }
-                        else:
-                            review_entry = {
-                                "content_id": clause.get("content_id"),
-                                "clause_id": clause.get("clause_id"),
-                                "clause_type": clause_type,
-                                "content": client_text,
-                                "page_number": clause.get("page_number", 1),
-                                "risk": "High",
-                                "similarity_score": 0.0,
-                                "matched_clause": None,
-                                "status": "pending"
-                            }
-                        final_reviews.append(review_entry)
-                    else:
-                        # Skip tiny lines/headers
-                        final_reviews.append({
-                            "content_id": clause.get("content_id"),
-                            "clause_id": clause.get("clause_id"),
-                            "clause_type": clause_type,
-                            "content": client_text,
-                            "page_number": clause.get("page_number", 1),
-                            "risk": "Low",
-                            "similarity_score": None,
-                            "matched_clause": None,
-                            "status": "pending"
-                        })
+                    except Exception as clause_err:
+                        print(f"[WARN] [Background] Pipeline failed for clause '{clause_type}': {clause_err}")
+                        best_match = None
 
-                # Save the complete review JSON for the legal team's dashboard
+                    if best_match:
+                        review_entry = {
+                            "content_id":       clause.get("content_id"),
+                            "clause_id":        clause.get("clause_id"),
+                            "clause_type":      clause_type,
+                            "content":          client_text,
+                            "page_number":      clause.get("page_number", 1),
+                            "risk":             best_match.get("final_risk", "High"),
+                            "similarity_score": best_match.get("sbert_similarity"),
+                            "matched_clause": {
+                                "content":       best_match.get("template_content"),
+                                "document_type": best_match.get("template_metadata", {}).get("document_type", "Template")
+                            },
+                            "llm_reasoning":    best_match.get("llm_reasoning"),
+                            "status":           "pending"
+                        }
+                    else:
+                        review_entry = {
+                            "content_id":       clause.get("content_id"),
+                            "clause_id":        clause.get("clause_id"),
+                            "clause_type":      clause_type,
+                            "content":          client_text,
+                            "page_number":      clause.get("page_number", 1),
+                            "risk":             "High",
+                            "similarity_score": 0.0,
+                            "matched_clause":   None,
+                            "llm_reasoning":    None,
+                            "status":           "pending"
+                        }
+                    final_reviews.append(review_entry)
+
+                # Always save review — even if some clauses fell back to High risk
                 reviews_dir = DATA_DIR / "reviews"
                 reviews_dir.mkdir(parents=True, exist_ok=True)
                 review_path = reviews_dir / f"{document_id}.json"
-                
                 with open(review_path, "w", encoding="utf-8") as f:
                     json.dump(final_reviews, f, indent=4)
-                    
-                # [NEW] Save to PostgreSQL document_reviews table
-                try:
-                    if db_pool:
-                        temp_conn = db_pool.getconn()
-                        try:
-                            with temp_conn.cursor() as cur:
-                                cur.execute(
-                                    """
-                                    INSERT INTO document_reviews (document_id, review_data)
-                                    VALUES (%s, %s)
-                                    ON CONFLICT (document_id) DO UPDATE 
-                                    SET review_data = EXCLUDED.review_data, created_at = NOW()
-                                    """,
-                                    (document_id, json.dumps(final_reviews))
-                                )
-                            temp_conn.commit()
-                        finally:
-                            db_pool.putconn(temp_conn)
-                except Exception as db_err:
-                    print(f"[ERROR] [Background] Failed to save review to DB: {db_err}")
-                
-                print(f"[SUCCESS] [Background] Vector review pipeline complete. Saved to {review_path} and DB.")
+
+                if db_pool:
+                    r_conn = db_pool.getconn()
+                    try:
+                        with r_conn.cursor() as cur:
+                            cur.execute(
+                                """
+                                INSERT INTO document_reviews (document_id, review_data)
+                                VALUES (%s, %s)
+                                ON CONFLICT (document_id) DO UPDATE
+                                SET review_data = EXCLUDED.review_data, created_at = NOW()
+                                """,
+                                (document_id, json.dumps(final_reviews))
+                            )
+                        r_conn.commit()
+                    except Exception as db_err:
+                        print(f"[ERROR] [Background] Failed to save review to DB: {db_err}")
+                        r_conn.rollback()
+                    finally:
+                        db_pool.putconn(r_conn)
+
+                print(f"[SUCCESS] [Background] Review pipeline complete — {len(final_reviews)} clauses saved.")
                 
         except Exception as vector_err:
             print(f"[ERROR] [Background] Vector pipeline failed: {vector_err}")
             import traceback
             traceback.print_exc()
-        # ----------------------------------------------
+        # -----------------------------------------------------------------------
 
         # Update document status to 'completed' in PostgreSQL
         if document_id and db_pool:
@@ -1443,11 +1431,24 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
     conn = db_pool.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("SELECT id, user_id, s3_key FROM documents WHERE id = %s", (document_id,))
-            doc = cur.fetchone()
-            if not doc: raise HTTPException(status_code=404)
-            if current_user["role"] == "client" and doc[1] != current_user["user_id"]: raise HTTPException(status_code=403)
-            
+            # Fetch full document metadata
+            cur.execute(
+                "SELECT id, filename, document_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, file_path, s3_url, s3_key FROM documents WHERE id = %s",
+                (document_id,)
+            )
+            doc_row = cur.fetchone()
+            if not doc_row: raise HTTPException(status_code=404)
+            if current_user["role"] == "client" and doc_row[3] != current_user["user_id"]: raise HTTPException(status_code=403)
+
+            doc_meta = {
+                "id": doc_row[0], "filename": doc_row[1], "document_type": doc_row[2],
+                "user_id": doc_row[3], "user_email": doc_row[4], "user_role": doc_row[5],
+                "size": doc_row[6], "status": doc_row[7], "shared_with": doc_row[8],
+                "uploaded_at": doc_row[9].isoformat() if doc_row[9] else None,
+                "file_path": doc_row[10], "s3_url": doc_row[11], "s3_key": doc_row[12]
+            }
+            s3_key = doc_row[12]
+
             # 1. DB check for risk analysis
             cur.execute("SELECT review_data FROM document_reviews WHERE document_id = %s", (document_id,))
             db_review = cur.fetchone()
@@ -1483,17 +1484,93 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
                         clause["edited_content"] = db_vals["edited_content"]
                         clause["comment"] = db_vals["comment"]
                         
-                return {"clauses": clauses, "status": "complete"}
+                return {"document": doc_meta, "clauses": clauses, "status": "complete"}
             
-            # Fallback analysis
-            if doc[2]:
-                base = Path(doc[2]).stem
-                fallback = Path(__file__).parent.parent / "extracter" / "extracted_texts" / f"{base}.json"
-                if fallback.exists():
-                    with open(fallback, "r", encoding="utf-8") as f:
-                        return {"clauses": json.load(f), "status": "processing"}
-            return {"clauses": [], "status": "processing"}
+            # Fallback: read directly from clauses table (vector pipeline may have failed,
+            # but extraction still saved clauses — show them with a default risk level)
+            cur.execute(
+                """SELECT clause_id, clause, content_id, content, page_number,
+                          approval_status, edited_content, comment
+                   FROM clauses WHERE document_id = %s ORDER BY page_number ASC""",
+                (document_id,)
+            )
+            raw_clauses = cur.fetchall()
+            if raw_clauses:
+                clauses_fallback = [
+                    {
+                        "clause_id":     r[0],
+                        "clause_type":   r[1],
+                        "content_id":    r[2],
+                        "content":       r[3],
+                        "page_number":   r[4],
+                        "risk":          "High",
+                        "similarity_score": None,
+                        "matched_clause":   None,
+                        "llm_reasoning":    None,
+                        "status":        r[5] or "pending",
+                        "edited_content": r[6],
+                        "comment":       r[7],
+                    }
+                    for r in raw_clauses
+                ]
+                return {"document": doc_meta, "clauses": clauses_fallback, "status": "complete"}
+
+            return {"document": doc_meta, "clauses": [], "status": "processing"}
     finally: db_pool.putconn(conn)
+
+
+@app.post("/api/documents/reprocess/{document_id}")
+def reprocess_document(document_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(verify_token)):
+    """Re-trigger extraction and vector review pipeline for an existing document."""
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT s3_key, document_type, user_role FROM documents WHERE id = %s",
+                (document_id,)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Document not found")
+
+            s3_key, document_type, user_role = row
+            if not s3_key:
+                raise HTTPException(status_code=400, detail="No s3_key for this document – cannot reprocess")
+
+            # Determine source from role
+            source = "legal" if user_role in ("admin", "legal_team") else "client"
+
+            # Clear old clauses and review so pipeline writes fresh results
+            cur.execute("DELETE FROM clauses WHERE document_id = %s", (document_id,))
+            cur.execute("DELETE FROM document_reviews WHERE document_id = %s", (document_id,))
+            cur.execute("UPDATE documents SET status = 'processing' WHERE id = %s", (document_id,))
+        conn.commit()
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
+
+    # Ensure the file is available locally before triggering extraction
+    local_path = UPLOADS_DIR / s3_key
+    if not local_path.exists():
+        try:
+            s3_client.download_file(BUCKET_NAME, s3_key, str(local_path))
+            print(f"[INFO] [Reprocess] Downloaded {s3_key} from S3 to {local_path}")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to download file from S3: {str(e)}")
+
+    # Kick off background extraction (same as upload flow)
+    background_tasks.add_task(trigger_extraction, s3_key, document_type, source)
+    return {"message": "Reprocessing started", "document_id": document_id}
 
 
 
