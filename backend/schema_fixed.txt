@@ -1,0 +1,14 @@
+﻿Column Name          | Data Type            | Max Length   | Nullable | Default
+--------------------------------------------------------------------------------
+created_at           | timestamp with time zone | None         | NO       | now()
+page_number          | integer              | None         | NO       | 1
+content_id           | text                 | None         | NO       | None
+content              | text                 | None         | NO       | None
+document             | text                 | None         | NO       | None
+source               | text                 | None         | NO       | None
+document_id          | text                 | None         | YES      | None
+approval_status      | character varying    | 50           | YES      | 'pending'::character varying
+edited_content       | text                 | None         | YES      | None
+clause_id            | text                 | None         | NO       | None
+comment              | text                 | None         | YES      | None
+clause               | text                 | None         | NO       | None
