@@ -40,6 +40,7 @@ CREATE TABLE documents (
     size            BIGINT      DEFAULT 0,
     status          TEXT        NOT NULL DEFAULT 'uploaded'
                     CHECK (status IN ('pending','uploaded','approved','rejected')),
+    is_finalized    BOOLEAN     NOT NULL DEFAULT FALSE,
     shared_with     JSONB       NOT NULL DEFAULT '[]',  -- array of user_ids or 'admin'
     uploaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     file_path       TEXT,
@@ -88,6 +89,19 @@ CREATE TABLE clauses (
 
 CREATE INDEX idx_clauses_document_id ON clauses(document_id);
 CREATE INDEX idx_clauses_clause      ON clauses(clause);
+
+
+-- =============================================================
+-- EDITED_CLAUSES
+-- Stores legal team edits and comments on individual clauses
+-- =============================================================
+CREATE TABLE edited_clauses (
+    content_id    TEXT        PRIMARY KEY REFERENCES clauses(content_id) ON DELETE CASCADE,
+    original_clause TEXT      NOT NULL,
+    edited_clause   TEXT,
+    comment       TEXT,
+    updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 
 -- =============================================================

@@ -115,6 +115,23 @@ const ClientWorkspace = ({ user, onLogout }) => {
         }
     };
 
+    const handleFinalize = async (docId) => {
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/documents/finalize/${docId}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                loadData();
+                loadActivities();
+            }
+            else console.error('Finalize failed');
+        } catch (err) {
+            console.error('Finalize error:', err);
+        }
+    };
+
     const handleDownload = async (docId) => {
         try {
             const token = localStorage.getItem('token');
@@ -259,6 +276,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
                                         onApprove={handleApprove}
                                         onReject={handleReject}
                                         onDownload={handleDownload}
+                                        onFinalize={handleFinalize}
                                     />
                                 </div>
                             </div>

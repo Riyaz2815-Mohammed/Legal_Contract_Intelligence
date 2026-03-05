@@ -29,6 +29,7 @@ function ClientsTable({ clients, loading, onDelete, onOpenWorkspace }) {
                         <th>Documents</th>
                         <th>Pending</th>
                         <th>Actions</th>
+                        <th>Finalized Document</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -73,6 +74,33 @@ function ClientsTable({ clients, loading, onDelete, onOpenWorkspace }) {
                                         </svg>
                                     </button>
                                 </div>
+                            </td>
+                            <td>
+                                {client.finalizedDocName ? (
+                                    <div className="finalized-doc-badge" style={{
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        gap: '0.5rem',
+                                        padding: '0.4rem 0.8rem',
+                                        background: 'rgba(16, 185, 129, 0.1)',
+                                        color: '#059669',
+                                        borderRadius: '20px',
+                                        fontSize: '0.85rem',
+                                        fontWeight: '500',
+                                        maxWidth: '200px'
+                                    }}>
+                                        <span className="doc-icon">📄</span>
+                                        <span className="doc-name-text" style={{
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap'
+                                        }} title={client.finalizedDocName}>
+                                            {client.finalizedDocName}
+                                        </span>
+                                    </div>
+                                ) : (
+                                    <span style={{ color: '#94a3b8', fontSize: '0.85rem', fontStyle: 'italic' }}>No finalized doc</span>
+                                )}
                             </td>
                         </tr>
                     ))}

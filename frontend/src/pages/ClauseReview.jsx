@@ -254,20 +254,48 @@ export default function ClauseReview({ user, onLogout }) {
         }
     };
 
-    // --- Render Helpers ---
+    const handleDownloadRedline = async () => {
+        setActionLoading(true);
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/documents/download-redline/${documentId}`, {
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(text || 'Download failed');
+            }
+            const blob = await res.blob();
 
-    // A simple diff renderer highlighting additions in red
-    const renderDiffText = (originalText, currentText) => {
-        if (!currentText || currentText === originalText) {
-            return <span>{originalText}</span>;
+            // Get filename from Content-Disposition if available, or generate one
+            const contentDisposition = res.headers.get('Content-Disposition');
+            let filename = `Redlined_Document.docx`;
+            if (contentDisposition) {
+                const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
+                if (filenameMatch && filenameMatch.length === 2) {
+                    filename = filenameMatch[1];
+                }
+            }
+
+            // Create object URL and trigger download
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        } catch (err) {
+            console.error('Download redline error', err);
+            alert(`Failed to download redline document: ${err.message}`);
+        } finally {
+            setActionLoading(false);
         }
-        return (
-            <span>
-                <span style={{ color: '#ef4444', fontWeight: '500' }}>[EDITED] </span>
-                <span dangerouslySetInnerHTML={{ __html: currentText.replace(/\n/g, '<br/>') }} />
-            </span>
-        );
     };
+
+    // --- Render Helpers ---
 
     return (
         <Layout user={user} onLogout={onLogout} pageTitle="Clause Review">
@@ -285,6 +313,17 @@ export default function ClauseReview({ user, onLogout }) {
                         {counts.High > 0 && <button className={`tab-btn high ${activeTab === 'High' ? 'active' : ''}`} onClick={() => setActiveTab('High')}>⊗ High Risk ({counts.High})</button>}
                         {counts.Medium > 0 && <button className={`tab-btn medium ${activeTab === 'Medium' ? 'active' : ''}`} onClick={() => setActiveTab('Medium')}>⚠ Medium Risk ({counts.Medium})</button>}
                         {counts.Low > 0 && <button className={`tab-btn low ${activeTab === 'Low' ? 'active' : ''}`} onClick={() => setActiveTab('Low')}>✓ Low Risk ({counts.Low})</button>}
+
+                        <div style={{ paddingLeft: '2rem', display: 'flex' }}>
+                            <button
+                                className="btn-action"
+                                style={{ backgroundColor: '#2563eb', color: 'white', padding: '0.4rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '500' }}
+                                onClick={handleDownloadRedline}
+                                disabled={actionLoading || isProcessing}
+                            >
+                                <span>📄</span> Download Redline (.docx)
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -368,46 +407,65 @@ export default function ClauseReview({ user, onLogout }) {
                                     {/* Left: Client Contract */}
                                     <div className="comp-pane upload-pane">
                                         <div className="pane-title">📄 Uploaded Contract</div>
-                                        <div className="pane-content">
-                                            {isEditing ? (
-                                                <div className="edit-mode-container">
-                                                    <textarea
-                                                        className="edit-textarea"
-                                                        value={editValue}
-                                                        onChange={e => setEditValue(e.target.value)}
-                                                        rows={6}
-                                                    />
-                                                    <div className="edit-actions">
-                                                        <button className="btn-save btn-small" onClick={saveEdit}>Save Edit</button>
-                                                        <button className="btn-cancel btn-small" onClick={() => setIsEditing(false)}>Cancel</button>
+                                        <div className="pane-content" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                                            <div className="clause-edit-section">
+                                                {isEditing ? (
+                                                    <div className="edit-mode-container">
+                                                        <textarea
+                                                            className="edit-textarea"
+                                                            value={editValue}
+                                                            onChange={e => setEditValue(e.target.value)}
+                                                            rows={6}
+                                                        />
+                                                        <div className="edit-actions">
+                                                            <button className="btn-save btn-small" onClick={saveEdit}>Save Edit</button>
+                                                            <button className="btn-cancel btn-small" onClick={() => setIsEditing(false)}>Cancel</button>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            ) : (
-                                                <div className="text-display">
-                                                    {renderDiffText(selectedClause.content, selectedClause.edited_content || selectedClause.content)}
-                                                </div>
-                                            )}
+                                                ) : (
+                                                    <div className="text-display">
+                                                        {selectedClause.html_diff ? (
+                                                            <span dangerouslySetInnerHTML={{ __html: selectedClause.html_diff }} />
+                                                        ) : (
+                                                            selectedClause.content
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+
+                                            <div className="clause-comment-section" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
+                                                <div style={{ fontWeight: '600', marginBottom: '0.5rem', color: '#475569' }}>Legal Note / Comment:</div>
+                                                {isCommenting ? (
+                                                    <div className="comment-mode-container">
+                                                        <textarea
+                                                            className="comment-input"
+                                                            style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #cbd5e1', minHeight: '60px', resize: 'vertical' }}
+                                                            value={commentValue}
+                                                            onChange={e => setCommentValue(e.target.value)}
+                                                            placeholder="Add a comment..."
+                                                        />
+                                                        <div className="edit-actions" style={{ marginTop: '0.5rem' }}>
+                                                            <button className="btn-save btn-small" onClick={saveComment}>Save Comment</button>
+                                                            <button className="btn-cancel btn-small" onClick={() => {
+                                                                setCommentValue(selectedClause.comment || '');
+                                                                setIsCommenting(false);
+                                                            }}>Cancel</button>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div className="clause-comment-display" style={{ padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0', cursor: 'pointer' }} onClick={() => {
+                                                        setCommentValue(selectedClause.comment || '');
+                                                        setIsCommenting(true);
+                                                    }}>
+                                                        {selectedClause.comment ? (
+                                                            <span>{selectedClause.comment}</span>
+                                                        ) : (
+                                                            <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Add a comment...</span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
                                         </div>
-                                        {selectedClause.comment && !isCommenting && (
-                                            <div className="clause-comment-display">
-                                                <strong>Notes:</strong> {selectedClause.comment}
-                                            </div>
-                                        )}
-                                        {isCommenting && (
-                                            <div className="comment-mode-container">
-                                                <input
-                                                    type="text"
-                                                    className="comment-input"
-                                                    value={commentValue}
-                                                    onChange={e => setCommentValue(e.target.value)}
-                                                    placeholder="Type a comment..."
-                                                />
-                                                <div className="edit-actions">
-                                                    <button className="btn-save btn-small" onClick={saveComment}>Save</button>
-                                                    <button className="btn-cancel btn-small" onClick={() => setIsCommenting(false)}>Cancel</button>
-                                                </div>
-                                            </div>
-                                        )}
                                     </div>
 
                                     {/* Right: Standard Clause */}
@@ -448,17 +506,6 @@ export default function ClauseReview({ user, onLogout }) {
                                 <div className="detail-actions">
                                     <div className="left-actions">
                                         <button
-                                            className="btn-action btn-comment"
-                                            onClick={() => {
-                                                setCommentValue(selectedClause.comment || '');
-                                                setIsCommenting(true);
-                                                setIsEditing(false);
-                                            }}
-                                            disabled={actionLoading}
-                                        >
-                                            💬 Comment
-                                        </button>
-                                        <button
                                             className="btn-action btn-edit"
                                             onClick={() => {
                                                 setEditValue(selectedClause.edited_content || selectedClause.content);
@@ -467,7 +514,7 @@ export default function ClauseReview({ user, onLogout }) {
                                             }}
                                             disabled={actionLoading}
                                         >
-                                            ✏️ Edit
+                                            ✏️ Edit Clause
                                         </button>
                                     </div>
                                     <div className="right-actions">

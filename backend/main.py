@@ -122,6 +122,14 @@ class DocumentShare(BaseModel):
     document_id: str
     share_with: str  # client_id or 'admin'
 
+class ClauseEdit(BaseModel):
+    content_id: str
+    edited_content: str
+
+class ClauseComment(BaseModel):
+    content_id: str
+    comment: str
+
 class MessageSend(BaseModel):
     recipient_id: str  # client_id or 'admin'
     content: str
@@ -960,7 +968,14 @@ def get_document_analysis(document_id: str, current_user: dict = Depends(verify_
             }
             # Query clauses from database
             cur.execute(
-                "SELECT clause_id, clause, content_id, content, page_number FROM clauses WHERE document_id = %s ORDER BY page_number ASC",
+                """
+                SELECT c.clause_id, c.clause, c.content_id, c.content, c.page_number,
+                       e.edited_clause, e.comment
+                FROM clauses c
+                LEFT JOIN edited_clauses e ON c.content_id = e.content_id
+                WHERE c.document_id = %s
+                ORDER BY c.page_number ASC, c.ctid ASC
+                """,
                 (document_id,)
             )
             clause_rows = cur.fetchall()
@@ -968,16 +983,38 @@ def get_document_analysis(document_id: str, current_user: dict = Depends(verify_
             if not clause_rows:
                 return {"document": doc, "clauses": [], "status": "processing"}
                 
-            clauses_data = [
-                {
+            import difflib
+            clauses_data = []
+            for r in clause_rows:
+                orig_content = r[3]
+                edited_content = r[5]
+                html_diff = None
+                
+                if edited_content and edited_content != orig_content:
+                    seq = difflib.SequenceMatcher(None, orig_content, edited_content)
+                    out = []
+                    for opcode, i1, i2, j1, j2 in seq.get_opcodes():
+                        if opcode == 'equal':
+                            out.append(orig_content[i1:i2])
+                        elif opcode == 'delete':
+                            out.append(f"<del style='color:red; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
+                        elif opcode == 'insert':
+                            out.append(f"<ins style='color:red; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
+                        elif opcode == 'replace':
+                            out.append(f"<del style='color:red; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
+                            out.append(f"<ins style='color:red; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
+                    html_diff = "".join(out).replace('\n', '<br/>')
+
+                clauses_data.append({
                     "clause_id": r[0],
                     "clause": r[1],
                     "content_id": r[2],
-                    "content": r[3],
-                    "page_number": r[4]
-                }
-                for r in clause_rows
-            ]
+                    "content": orig_content,
+                    "page_number": r[4],
+                    "edited_content": edited_content,
+                    "comment": r[6],
+                    "html_diff": html_diff
+                })
             
             return {"document": doc, "clauses": clauses_data, "status": "complete"}
                 
@@ -990,6 +1027,258 @@ def get_document_analysis(document_id: str, current_user: dict = Depends(verify_
     finally:
         if conn: db_pool.putconn(conn)
 
+
+class ClauseEditRequest(BaseModel):
+    content_id: str
+    edited_content: str
+
+@app.post("/api/documents/review/{document_id}/edit")
+def edit_clause(document_id: str, edit_request: ClauseEditRequest, current_user: dict = Depends(verify_token)):
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # Upsert logic - Needs Original Clause
+            cur.execute("SELECT content FROM clauses WHERE content_id = %s", (edit_request.content_id,))
+            res = cur.fetchone()
+            if not res:
+                raise HTTPException(status_code=404, detail="Clause not found")
+            original_content = res[0]
+            
+            cur.execute(
+                """
+                INSERT INTO edited_clauses (content_id, original_clause, edited_clause, updated_at)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (content_id) DO UPDATE 
+                SET edited_clause = EXCLUDED.edited_clause, updated_at = NOW()
+                """,
+                (edit_request.content_id, original_content, edit_request.edited_content)
+            )
+        conn.commit()
+        return {"message": "Edit saved successfully"}
+    except Exception as e:
+        print(f"[ERROR] Save edit error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
+
+
+class ClauseCommentRequest(BaseModel):
+    content_id: str
+    comment: str
+
+@app.post("/api/documents/review/{document_id}/comment")
+def add_clause_comment(document_id: str, comment_request: ClauseCommentRequest, current_user: dict = Depends(verify_token)):
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # Upsert logic
+            cur.execute("SELECT content FROM clauses WHERE content_id = %s", (comment_request.content_id,))
+            res = cur.fetchone()
+            if not res:
+                raise HTTPException(status_code=404, detail="Clause not found")
+            original_content = res[0]
+            
+            cur.execute(
+                """
+                INSERT INTO edited_clauses (content_id, original_clause, comment, updated_at)
+                VALUES (%s, %s, %s, NOW())
+                ON CONFLICT (content_id) DO UPDATE 
+                SET comment = EXCLUDED.comment, updated_at = NOW()
+                """,
+                (comment_request.content_id, original_content, comment_request.comment)
+            )
+        conn.commit()
+        return {"message": "Comment saved successfully"}
+    except Exception as e:
+        print(f"[ERROR] Save comment error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
+
+
+@app.get("/api/documents/download-redline/{document_id}")
+def download_redline(document_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(verify_token)):
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # 1. Fetch document metadata
+            cur.execute("SELECT filename FROM documents WHERE id = %s", (document_id,))
+            doc_res = cur.fetchone()
+            if not doc_res:
+                raise HTTPException(status_code=404, detail="Document not found")
+            original_filename = doc_res[0]
+            
+            # 2. Fetch clauses + edits/comments in order
+            cur.execute(
+                """
+                SELECT c.content, e.edited_clause, e.comment
+                FROM clauses c
+                LEFT JOIN edited_clauses e ON c.content_id = e.content_id
+                WHERE c.document_id = %s
+                ORDER BY c.page_number ASC, c.ctid ASC
+                """,
+                (document_id,)
+            )
+            rows = cur.fetchall()
+            
+            if not rows:
+                raise HTTPException(status_code=404, detail="No clauses found for this document")
+
+    except Exception as e:
+        print(f"[ERROR] Fetching redline data: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
+
+    # 3. Generate Redlined Docx
+    try:
+        import docx
+    except ImportError:
+        raise HTTPException(status_code=500, detail="python-docx library not installed")
+
+    from docx.shared import RGBColor
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    import difflib
+    from datetime import datetime
+
+    document = docx.Document()
+    # Setup comments xml part
+    comments_part = None
+    if 'comments' not in document.part.rels:
+        try:
+            from docx.opc.part import XmlPart
+            from docx.oxml import parse_xml
+            from docx.opc.constants import RELATIONSHIP_TYPE, CONTENT_TYPE
+            from docx.opc.packuri import PackURI
+            
+            comments_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"></w:comments>'
+            comments_part = XmlPart(
+                PackURI('/word/comments.xml'), 
+                CONTENT_TYPE.WML_COMMENTS, 
+                parse_xml(comments_xml.encode('utf-8')), 
+                document.part.package
+            )
+            document.part.relate_to(comments_part, RELATIONSHIP_TYPE.COMMENTS)
+        except Exception as e:
+            print(f"[ERROR] Adding comments part: {e}")
+            pass
+    else:
+        comments_part = document.part.rels['comments'].target_part
+
+    comment_id_counter = 0
+
+    for idx, row in enumerate(rows):
+        original, edited, comment = row
+        p = document.add_paragraph()
+        
+        if not edited or edited == original:
+            # Unchanged
+            p.add_run(original)
+        else:
+            # Diff original vs edited
+            seq = difflib.SequenceMatcher(None, original, edited)
+            for opcode, i1, i2, j1, j2 in seq.get_opcodes():
+                if opcode == 'equal':
+                    p.add_run(original[i1:i2])
+                elif opcode == 'delete':
+                    run = p.add_run(original[i1:i2])
+                    run.font.strike = True
+                    run.font.color.rgb = RGBColor(255, 0, 0)  # Red for strikethrough
+                elif opcode == 'insert':
+                    run = p.add_run(edited[j1:j2])
+                    run.font.color.rgb = RGBColor(255, 0, 0)      # Red for new
+                    run.font.underline = True
+                elif opcode == 'replace':
+                    # Delete original
+                    run_del = p.add_run(original[i1:i2])
+                    run_del.font.strike = True
+                    run_del.font.color.rgb = RGBColor(255, 0, 0)
+                    # Insert new
+                    run_ins = p.add_run(edited[j1:j2])
+                    run_ins.font.color.rgb = RGBColor(255, 0, 0)
+                    run_ins.font.underline = True
+
+        if comment and comments_part is not None:
+            comment_id_str = str(comment_id_counter)
+            comment_id_counter += 1
+            
+            comment_elem = OxmlElement('w:comment')
+            comment_elem.set(qn('w:id'), comment_id_str)
+            comment_elem.set(qn('w:author'), "Legal Team")
+            
+            c_p = OxmlElement('w:p')
+            c_r = OxmlElement('w:r')
+            c_t = OxmlElement('w:t')
+            c_t.text = comment
+            
+            c_r.append(c_t)
+            c_p.append(c_r)
+            comment_elem.append(c_p)
+
+            comments_part.element.append(comment_elem)
+
+            comment_start = OxmlElement('w:commentRangeStart')
+            comment_start.set(qn('w:id'), comment_id_str)
+            p._p.insert(0, comment_start)
+
+            comment_end = OxmlElement('w:commentRangeEnd')
+            comment_end.set(qn('w:id'), comment_id_str)
+            p._p.append(comment_end)
+
+            comment_ref_r = OxmlElement('w:r')
+            comment_ref = OxmlElement('w:commentReference')
+            comment_ref.set(qn('w:id'), comment_id_str)
+            comment_ref_r.append(comment_ref)
+            p._p.append(comment_ref_r)
+            
+        # Add some spacing between clauses
+        if idx < len(rows) - 1:
+            document.add_paragraph()
+
+    # Save to temp file
+    import tempfile
+    import os
+    from fastapi.responses import FileResponse
+    
+    # Create temp file
+    fd, path = tempfile.mkstemp(suffix=".docx")
+    os.close(fd)
+    
+    try:
+        document.save(path)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to save document: {str(e)}")
+    
+    download_filename = f"Redlined_{original_filename.replace('.pdf', '').replace('.txt', '')}.docx"
+    
+    # Use FastAPI FileResponse which handles downloading, and remove temp file after
+    return FileResponse(
+        path=path, 
+        filename=download_filename, 
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        background=background_tasks.add_task(os.remove, path)
+    )
 
 @app.get("/api/documents/download/{document_id}")
 def download_document(document_id: str, current_user: dict = Depends(verify_token)):
@@ -1483,7 +1772,12 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
                         
             if clauses is not None:
                 # Fetch live statuses, edits, and comments from DB
-                cur.execute("SELECT content_id, approval_status, edited_content, comment FROM clauses WHERE document_id = %s", (document_id,))
+                cur.execute("""
+                    SELECT c.content_id, c.approval_status, e.edited_clause, e.comment 
+                    FROM clauses c
+                    LEFT JOIN edited_clauses e ON c.content_id = e.content_id
+                    WHERE c.document_id = %s
+                """, (document_id,))
                 status_map = {}
                 for row in cur.fetchall():
                     status_map[row[0]] = {
@@ -1492,6 +1786,7 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
                         "comment": row[3]
                     }
                 
+                import difflib
                 # Apply live overrides to the JSON payload
                 for clause in clauses:
                     cid = clause.get("content_id")
@@ -1501,35 +1796,75 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
                         clause["edited_content"] = db_vals["edited_content"]
                         clause["comment"] = db_vals["comment"]
                         
+                        orig_content = clause.get("content", "")
+                        edited_content = db_vals["edited_content"]
+                        html_diff = None
+                        if edited_content and edited_content != orig_content:
+                            seq = difflib.SequenceMatcher(None, orig_content, edited_content)
+                            out = []
+                            for opcode, i1, i2, j1, j2 in seq.get_opcodes():
+                                if opcode == 'equal':
+                                    out.append(orig_content[i1:i2])
+                                elif opcode == 'delete':
+                                    out.append(f"<del style='color:red; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
+                                elif opcode == 'insert':
+                                    out.append(f"<ins style='color:red; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
+                                elif opcode == 'replace':
+                                    out.append(f"<del style='color:red; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
+                                    out.append(f"<ins style='color:red; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
+                            html_diff = "".join(out).replace('\n', '<br/>')
+                        clause["html_diff"] = html_diff
+                        
                 return {"document": doc_meta, "clauses": clauses, "status": "complete"}
             
             # Fallback: read directly from clauses table (vector pipeline may have failed,
             # but extraction still saved clauses — show them with a default risk level)
             cur.execute(
-                """SELECT clause_id, clause, content_id, content, page_number,
-                          approval_status, edited_content, comment
-                   FROM clauses WHERE document_id = %s ORDER BY page_number ASC""",
+                """SELECT c.clause_id, c.clause, c.content_id, c.content, c.page_number,
+                          c.approval_status, e.edited_clause, e.comment
+                   FROM clauses c
+                   LEFT JOIN edited_clauses e ON c.content_id = e.content_id
+                   WHERE c.document_id = %s ORDER BY c.page_number ASC, c.ctid ASC""",
                 (document_id,)
             )
             raw_clauses = cur.fetchall()
+            import difflib
             if raw_clauses:
-                clauses_fallback = [
-                    {
+                clauses_fallback = []
+                for r in raw_clauses:
+                    orig_content = r[3]
+                    edited_content = r[6]
+                    html_diff = None
+                    if edited_content and edited_content != orig_content:
+                        seq = difflib.SequenceMatcher(None, orig_content, edited_content)
+                        out = []
+                        for opcode, i1, i2, j1, j2 in seq.get_opcodes():
+                            if opcode == 'equal':
+                                out.append(orig_content[i1:i2])
+                            elif opcode == 'delete':
+                                out.append(f"<del style='color:red; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
+                            elif opcode == 'insert':
+                                out.append(f"<ins style='color:red; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
+                            elif opcode == 'replace':
+                                out.append(f"<del style='color:red; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
+                                out.append(f"<ins style='color:red; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
+                        html_diff = "".join(out).replace('\n', '<br/>')
+
+                    clauses_fallback.append({
                         "clause_id":     r[0],
                         "clause_type":   r[1],
                         "content_id":    r[2],
-                        "content":       r[3],
+                        "content":       orig_content,
                         "page_number":   r[4],
                         "risk":          "High",
                         "similarity_score": None,
                         "matched_clause":   None,
                         "llm_reasoning":    None,
                         "status":        r[5] or "pending",
-                        "edited_content": r[6],
+                        "edited_content": edited_content,
                         "comment":       r[7],
-                    }
-                    for r in raw_clauses
-                ]
+                        "html_diff":     html_diff
+                    })
                 return {"document": doc_meta, "clauses": clauses_fallback, "status": "complete"}
 
             return {"document": doc_meta, "clauses": [], "status": "processing"}
@@ -1647,100 +1982,7 @@ def clause_action(document_id: str, req: ClauseActionRequest, current_user: dict
 
 
 
-class ClauseEditRequest(BaseModel):
-    content_id: str
-    edited_content: str
 
-@app.post("/api/documents/review/{document_id}/edit")
-def update_clause_content(document_id: str, req: ClauseEditRequest, current_user: dict = Depends(verify_token)):
-    if not db_pool:
-        raise HTTPException(status_code=500, detail="Database not connected")
-    
-    conn = None
-    try:
-        conn = db_pool.getconn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT user_id FROM documents WHERE id = %s", (document_id,))
-            doc = cur.fetchone()
-            if not doc:
-                raise HTTPException(status_code=404, detail="Document not found")
-            
-            if current_user["role"] == "client" and doc[0] != current_user["user_id"]:
-                raise HTTPException(status_code=403, detail="Forbidden")
-
-        updated = False
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE clauses SET edited_content = %s WHERE content_id = %s RETURNING id",
-                    (req.edited_content, req.content_id)
-                )
-                if cur.fetchone():
-                    updated = True
-            conn.commit()
-        except Exception as e:
-            print(f"[ERROR] DB update failed for clause edit: {e}")
-            conn.rollback()
-            raise HTTPException(status_code=500, detail="Database error during edit")
-            
-        if not updated:
-            raise HTTPException(status_code=404, detail="Clause not found in database")
-
-        return {"message": "Clause edited successfully", "content_id": req.content_id}
-    except HTTPException: raise
-    except Exception as e:
-        print(f"[ERROR] Clause edit error: {e}")
-        raise HTTPException(status_code=500, detail="Processing error")
-    finally:
-        if conn: db_pool.putconn(conn)
-
-
-class ClauseCommentRequest(BaseModel):
-    content_id: str
-    comment: str
-
-@app.post("/api/documents/review/{document_id}/comment")
-def update_clause_comment(document_id: str, req: ClauseCommentRequest, current_user: dict = Depends(verify_token)):
-    if not db_pool:
-        raise HTTPException(status_code=500, detail="Database not connected")
-    
-    conn = None
-    try:
-        conn = db_pool.getconn()
-        with conn.cursor() as cur:
-            cur.execute("SELECT user_id FROM documents WHERE id = %s", (document_id,))
-            doc = cur.fetchone()
-            if not doc:
-                raise HTTPException(status_code=404, detail="Document not found")
-            
-            if current_user["role"] == "client" and doc[0] != current_user["user_id"]:
-                raise HTTPException(status_code=403, detail="Forbidden")
-
-        updated = False
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE clauses SET comment = %s WHERE content_id = %s RETURNING id",
-                    (req.comment, req.content_id)
-                )
-                if cur.fetchone():
-                    updated = True
-            conn.commit()
-        except Exception as e:
-            print(f"[ERROR] DB update failed for clause comment: {e}")
-            conn.rollback()
-            raise HTTPException(status_code=500, detail="Database error during comment")
-            
-        if not updated:
-            raise HTTPException(status_code=404, detail="Clause not found in database")
-
-        return {"message": "Clause comment added successfully", "content_id": req.content_id}
-    except HTTPException: raise
-    except Exception as e:
-        print(f"[ERROR] Clause comment error: {e}")
-        raise HTTPException(status_code=500, detail="Processing error")
-    finally:
-        if conn: db_pool.putconn(conn)
 
 
 class AskLLMRequest(BaseModel):

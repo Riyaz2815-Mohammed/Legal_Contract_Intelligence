@@ -3,7 +3,7 @@ import './DocumentsTable.css';
 
 const API_URL = 'http://localhost:8000';
 
-function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, currentUser, hideActions = false }) {
+function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, onFinalize, currentUser, hideActions = false }) {
     const navigate = useNavigate();
 
     const formatFileSize = (bytes) => {
@@ -69,6 +69,7 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, c
                 <th>Status</th>
                 <th>Size</th>
                 {!hideActions && <th>Actions</th>}
+                {isAdmin && <th>Finalize</th>}
             </tr>
         </thead>
     );
@@ -171,13 +172,23 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, c
                                         )}
                                     </div>
                                 </td>
-
+                            )}
+                            {isAdmin && (
+                                <td style={{ textAlign: 'center' }}>
+                                    <input
+                                        type="checkbox"
+                                        checked={doc.is_finalized || false}
+                                        onChange={() => onFinalize && onFinalize(doc.id)}
+                                        style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                                        title="Mark as Finalized"
+                                    />
+                                </td>
                             )}
                         </tr>
                     );
                 })}
-            </tbody>
-        </table>
+            </tbody >
+        </table >
     );
 }
 
