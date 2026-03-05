@@ -11,6 +11,7 @@ PyJWT==2.10.1
 # ── Database ───────────────────────────────────────────────
 psycopg2==2.9.11
 psycopg2-binary==2.9.11
+supabase==2.28.0
 
 # ── AWS ────────────────────────────────────────────────────
 boto3==1.42.54
@@ -31,8 +32,7 @@ mistralai==1.12.4
 
 # ── LangChain ─────────────────────────────────────────────
 langchain==1.2.10
-langchain-core==0.3.83
 langchain-community==0.4.1
-langchain-mistralai==0.2.10
-langchain-text-splitters==1.1.1
-langchain-huggingface==0.1.2   # used for HuggingFaceEmbeddings (langchain_community version is deprecated)
+langchain-mistralai
+langchain-huggingface
+langchain-text-splitters
