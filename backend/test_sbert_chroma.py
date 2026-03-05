@@ -57,7 +57,7 @@ for tc in test_cases:
 
     # Risk tagging
     risk = tag_risk(tc["text"], tc["clause_type"], sbert_score)
-    print(f"   🏷️  Risk: {risk['risk']} | Reason: {risk.get('risk_reason','')[:60]}")
+    print(f"   🏷️  Risk: {risk.get('final_risk', 'Unknown')} | Reason: {risk.get('risk_reason','')[:60]}")
 
 print("\n" + "="*60)
 print("Test complete.")

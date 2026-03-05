@@ -19,7 +19,7 @@ EMBEDDING_DEVICE = "cpu"
 EMBEDDING_NORMALIZE = True
 
 # ChromaDB
-backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 CHROMA_PERSIST_DIR = os.path.join(backend_dir, "data", "chroma_legal_db")
 CHROMA_COLLECTION = "legal_clauses"
 
