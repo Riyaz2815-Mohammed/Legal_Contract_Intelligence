@@ -25,8 +25,7 @@ LACCIS/
 ├── backend/              # FastAPI backend
 │   ├── main.py          # API server
 │   └── requirements.txt
-└── data/                # Auto-created data storage
-    └── uploads/         # Uploaded documents
+    └── extracted_texts/ # Auto-created directory for transient text extractions from PDFs
 ```
 
 ## 🚀 Quick Start
@@ -43,18 +42,11 @@ cd backend
 pip install -r requirements.txt
 ```
 
-2. **Configure SMTP settings in `backend/main.py`:**
-```python
-SMTP_SERVER = "smtp.gmail.com"
-SMTP_PORT = 587
-SMTP_USERNAME = "your-email@gmail.com"
-SMTP_PASSWORD = "your-16-char-app-password"  # Gmail App Password
-SMTP_FROM_EMAIL = "your-email@gmail.com"
-```
+2. **Environment Configuration** Create a `.env` file in the backend matching the `.env.ex` structure. Provide database connectivity, AWS S3 keys, and your EmailJS configuration.
 
 3. **Run the FastAPI server:**
 ```bash
-python main.py
+uvicorn main:app --reload
 ```
 
 The API will be available at `http://localhost:8000`
@@ -89,13 +81,14 @@ The app will be available at `http://localhost:5173`
 3. Add new clients by entering their name and email
 4. System automatically generates credentials and sends them via email
 5. View all clients and uploaded documents statistics
+6. Review client-uploaded agreements against **Standard Templates** (which the legal team provisions) using the AI clause extraction and risk assessment pipeline.
 
 ### For Clients
 
 1. Receive login credentials via email
 2. Login with provided credentials
 3. Upload contract documents using drag-and-drop
-4. View all uploaded documents
+4. View all uploaded documents and safely share fully reviewed documents back.
 
 ## 🛠️ Technology Stack
 
@@ -107,41 +100,41 @@ The app will be available at `http://localhost:5173`
 
 **Backend:**
 - FastAPI - Modern Python web framework
-- JWT - Authentication
-- SMTP - Email delivery
-- Python 3.13
+- PostgreSQL - Robust relational database for users, documents, and derived clauses
+- AWS S3 - Secure object storage for the actual PDF/Word documents
+- ChromaDB - Vector database for SBERT-based semantic similarity checking of clauses
+- Mistral AI & Langchain - For complex text extraction, OCR, and document summarization
+- PyJWT - Secure Authentication
 
 ## 📡 API Endpoints
 
 - `POST /api/auth/login` - User authentication
 - `POST /api/clients/create` - Create new client (admin only)
 - `GET /api/clients/list` - List all clients (admin only)
-- `POST /api/documents/upload` - Upload document
-- `GET /api/documents/list` - List documents
+- `POST /api/documents/upload` - Upload document directly to S3 and trigger NLP Extraction
+- `GET /api/documents/list` - List documents available to the requesting user
 - `GET /api/documents/stats` - Document statistics (admin only)
+- `GET /api/documents/review/{doc_id}` - Fetch AI clause-by-clause review for a document
 
-## 📧 SMTP Configuration
+## ⚙️ Configuration (.env)
 
-### For Gmail:
-1. Enable 2-factor authentication on your Google account
-2. Generate an App Password: https://myaccount.google.com/apppasswords
-3. Use the 16-character app password in `SMTP_PASSWORD`
+Make sure you configure your backend `.env` file correctly with these exact keys:
 
-### For Other Email Providers:
-Update the SMTP settings in `backend/main.py` accordingly.
+```ini
+DATABASE_URL=postgresql://user:password@host:port/dbname
+JWT_SECRET_KEY=your_secure_random_string
+AWS_ACCESS_KEY="aws_key"
+AWS_SECRET_KEY="aws_secret"
+REGION="aws_region"
+BUCKET_NAME="aws_s3_bucket"
+MISTRAL_API_KEY="mistral_key"
 
-## 🔒 Security Notes
-
-⚠️ **Important for Production:**
-- Change `SECRET_KEY` in `main.py`
-- Use a proper database instead of JSON files
-- Implement password hashing (bcrypt)
-- Use HTTPS
-- Add rate limiting
-- Implement proper error handling
-- Add input validation
-- Enable CORS properly
-- Use environment variables for sensitive data
+# EmailJS settings
+EMAILJS_SERVICE_ID=your_service
+EMAILJS_TEMPLATE_ID=your_template
+EMAILJS_PUBLIC_KEY=your_pub
+EMAILJS_PRIVATE_KEY=your_priv
+```
 
 ## 🚀 Production Build
 
