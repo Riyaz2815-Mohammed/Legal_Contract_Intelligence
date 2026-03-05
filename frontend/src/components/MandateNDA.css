@@ -1,0 +1,192 @@
+.mandate-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(241, 245, 249, 0.9);
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 2rem;
+}
+
+.mandate-card {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    border-radius: 1.5rem;
+    width: 100%;
+    max-width: 600px;
+    padding: 2.5rem;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+    animation: slideUp 0.4s ease-out;
+}
+
+@keyframes slideUp {
+    from {
+        transform: translateY(20px);
+        opacity: 0;
+    }
+
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+.mandate-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.mandate-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    display: block;
+}
+
+.mandate-header h2 {
+    color: #1e293b;
+    font-size: 1.75rem;
+    margin-bottom: 0.75rem;
+}
+
+.mandate-header p {
+    color: #475569;
+    line-height: 1.6;
+}
+
+.document-preview-box {
+    background: #f8fafc;
+    border: 1px dashed #cbd5e1;
+    border-radius: 1rem;
+    padding: 1.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 2rem;
+}
+
+.doc-info {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+}
+
+.doc-svg {
+    width: 2.5rem;
+    height: 2.5rem;
+    color: #2563eb;
+}
+
+.doc-details {
+    display: flex;
+    flex-direction: column;
+}
+
+.doc-label {
+    font-size: 0.75rem;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.doc-name {
+    color: #1e293b;
+    font-weight: 500;
+}
+
+.btn-view-doc {
+    background: #e2e8f0;
+    color: #1e293b;
+    border: none;
+    padding: 0.5rem 1rem;
+    border-radius: 0.5rem;
+    font-size: 0.875rem;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-view-doc:hover {
+    background: #cbd5e1;
+}
+
+.mandate-notice {
+    background: #eff6ff;
+    border-left: 4px solid #2563eb;
+    padding: 1rem;
+    border-radius: 0.5rem;
+    margin-bottom: 2.5rem;
+}
+
+.mandate-notice p {
+    color: #1e40af;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    margin: 0;
+}
+
+.mandate-actions {
+    display: flex;
+    gap: 1rem;
+}
+
+.mandate-actions button {
+    flex: 1;
+    padding: 0.75rem;
+    border-radius: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.btn-decline {
+    background: #ffffff;
+    border: 1px solid #e2e8f0;
+    color: #64748b;
+}
+
+.btn-decline:hover {
+    background: #fee2e2;
+    color: #dc2626;
+    border-color: #fecaca;
+}
+
+.btn-accept {
+    background: #2563eb;
+    border: none;
+    color: white;
+}
+
+.btn-accept:hover {
+    background: #1d4ed8;
+    transform: translateY(-2px);
+}
+
+.btn-accept.loading {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.mandate-loader {
+    text-align: center;
+    padding: 2rem;
+}
+
+.spinner-large {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #e2e8f0;
+    border-top-color: #2563eb;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 1.5rem;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}

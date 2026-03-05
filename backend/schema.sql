@@ -17,6 +17,7 @@ CREATE TABLE users (
     password_hash TEXT        NOT NULL,                 -- store bcrypt hash, NOT plaintext
     role          TEXT        NOT NULL                  -- 'admin' | 'legal_team' | 'client'
                   CHECK (role IN ('admin', 'legal_team', 'client')),
+    nda_accepted  BOOLEAN     NOT NULL DEFAULT FALSE,
     created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

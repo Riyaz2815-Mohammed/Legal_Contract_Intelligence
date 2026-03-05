@@ -1,17 +1,16 @@
 :root {
   --primary: #2563EB;
   --primary-dark: #1d4ed8;
-  --secondary: #7c3aed;
-  --accent: #db2777;
+  --secondary: #3b82f6;
+  --accent: #60a5fa;
   --success: #10b981;
   --danger: #ef4444;
-  --dark: #f1f5f9;
-  --dark-light: #e2e8f0;
-  --dark-lighter: #cbd5e1;
-  --text: #1e293b;
+  --bg-light: #f8fafc;
+  --border-light: #e2e8f0;
+  --text: #0f172a;
   --text-muted: #64748b;
-  --glass: #ffffff;
-  --glass-border: #e2e8f0;
+  --glass: rgba(255, 255, 255, 0.8);
+  --glass-border: rgba(255, 255, 255, 0.5);
 }
 
 * {
@@ -30,7 +29,7 @@ body {
 
 .app {
   min-height: 100vh;
-  background: #f8fafc;
+  background: var(--bg-light);
   position: relative;
   overflow-x: hidden;
 }
@@ -79,7 +78,7 @@ body {
 }
 
 .bg-animation::after {
-  background: var(--secondary);
+  background: var(--accent);
   bottom: -200px;
   right: -200px;
   animation-delay: 10s;

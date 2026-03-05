@@ -2,7 +2,7 @@ import './FromLegalTable.css';
 
 const API_URL = 'http://localhost:8000';
 
-function FromLegalTable({ contracts, loading, onAccept }) {
+function FromLegalTable({ contracts, loading, onAccept, onReject }) {
     const formatFileSize = (bytes) => {
         if (!bytes || bytes === 0) return '0 Bytes';
         const k = 1024;
@@ -15,12 +15,19 @@ function FromLegalTable({ contracts, loading, onAccept }) {
         if (status === 'accepted' || status === 'reviewed') {
             return { cls: 'badge-success', text: 'Accepted' };
         }
+        if (status === 'rejected') {
+            return { cls: 'badge-error', text: 'Rejected' };
+        }
+        if (status === 'pending_mandate') {
+            return { cls: 'badge-warning', text: 'Mandatory Approval' };
+        }
         return { cls: 'badge-pending', text: 'Pending Review' };
     };
 
     const handleDownload = async (contractId) => {
         try {
             const token = localStorage.getItem('token');
+            // Enhanced download logic with activity recording on backend
             const res = await fetch(`${API_URL}/api/contracts/download/${contractId}`, {
                 headers: { 'Authorization': `Bearer ${token}` }
             });
@@ -28,21 +35,19 @@ function FromLegalTable({ contracts, loading, onAccept }) {
             if (data.download_url) {
                 window.open(data.download_url, '_blank');
             } else if (res.ok) {
-                // Fetch as blob for browser download
-                const blobRes = await fetch(`${API_URL}/api/contracts/download/${contractId}`, {
+                // Handle direct file response
+                const blob = await (await fetch(`${API_URL}/api/contracts/download/${contractId}`, {
                     headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const blob = await blobRes.blob();
+                })).blob();
                 const url = window.URL.createObjectURL(blob);
                 const link = document.createElement('a');
                 link.href = url;
-                link.setAttribute('download', ''); // filename will be inferred or set by browser
+                link.setAttribute('download', contractId);
                 document.body.appendChild(link);
                 link.click();
                 link.remove();
-                window.URL.revokeObjectURL(url);
             } else {
-                alert('Download failed: ' + (data.detail || 'Unknown error'));
+                alert('Download failed: ' + (data.detail || 'Not Found'));
             }
         } catch (err) {
             console.error('Download error:', err);
@@ -124,15 +129,25 @@ function FromLegalTable({ contracts, loading, onAccept }) {
                                     >
                                         ⬇ Download
                                     </button>
-                                    {contract.status === 'pending_review' && (
-                                        <button
-                                            className="btn-action btn-approve"
-                                            onClick={() => onAccept && onAccept(contract.id)}
-                                            style={{ backgroundColor: '#10b981' }}
-                                            title="Accept Contract"
-                                        >
-                                            ✅ Accept
-                                        </button>
+                                    {(contract.status === 'pending_review' || contract.status === 'pending_mandate') && (
+                                        <>
+                                            <button
+                                                className="btn-action btn-approve"
+                                                onClick={() => onAccept && onAccept(contract.id, contract.is_mandate)}
+                                                style={{ backgroundColor: '#10b981', color: 'white' }}
+                                                title="Accept Contract"
+                                            >
+                                                ✅ Accept
+                                            </button>
+                                            <button
+                                                className="btn-action btn-reject"
+                                                onClick={() => onReject && onReject(contract.id, contract.is_mandate)}
+                                                style={{ backgroundColor: '#ef4444', color: 'white' }}
+                                                title="Reject Contract"
+                                            >
+                                                ❌ Reject
+                                            </button>
+                                        </>
                                     )}
                                 </div>
                             </td>
