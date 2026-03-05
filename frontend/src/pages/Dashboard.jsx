@@ -12,9 +12,11 @@ function Dashboard({ user, onLogout }) {
     const navigate = useNavigate();
 
     // Only actual clients see the client dashboard — admins and legal team see the full dashboard
-    if (user.role === 'client') {
+    if (user?.role === 'client') {
         return <ClientDashboard user={user} onLogout={onLogout} />;
     }
+
+    if (!user) return null;
 
     const [clients, setClients] = useState([]);
     const [stats, setStats] = useState({ totalDocs: 0, totalClients: 0, pendingReviews: 0 });

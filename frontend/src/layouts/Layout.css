@@ -1,7 +1,7 @@
 .layout-container {
     display: flex;
     min-height: 100vh;
-    background: #F5F6F8;
+    background: var(--bg-main);
 }
 
 .main-content {

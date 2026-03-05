@@ -8,6 +8,7 @@ import WorkspaceTabs from '../components/WorkspaceTabs';
 import ChatBox from '../components/ChatBox';
 import StatusBadge from '../components/StatusBadge';
 import ActivityList from '../components/ActivityList';
+import MandateNDA from '../components/MandateNDA';
 import './Dashboard.css';
 import './ClientWorkspace.css';
 
@@ -25,6 +26,7 @@ function ClientDashboard({ user, onLogout }) {
     const [sharedLoading, setSharedLoading] = useState(false);
     const [activities, setActivities] = useState([]);
     const [activitiesLoading, setActivitiesLoading] = useState(false);
+    const [currentUser, setCurrentUser] = useState(user);
 
     const loadDocuments = async () => {
         try {
@@ -101,6 +103,11 @@ function ClientDashboard({ user, onLogout }) {
         loadDocuments();
         loadLegalTeam();
         loadActivities();
+
+        // If NDA not accepted, default to From Legal tab
+        if (currentUser && !currentUser.nda_accepted) {
+            setActiveTab('from-legal');
+        }
     }, []);
 
     // Load shared contracts when From Legal tab is selected
@@ -122,14 +129,21 @@ function ClientDashboard({ user, onLogout }) {
         setActiveTab('documents');
     };
 
-    const handleAcceptContract = async (contractId) => {
+    const handleAcceptContract = async (contractId, isMandate = false) => {
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/contracts/accept/${contractId}`, {
+            const endpoint = isMandate ? `/api/contracts/accept-mandate` : `/api/contracts/accept/${contractId}`;
+            const res = await fetch(`${API_URL}${endpoint}`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
+                if (isMandate) {
+                    const userData = { ...currentUser, nda_accepted: true };
+                    localStorage.setItem('user', JSON.stringify(userData));
+                    setCurrentUser(userData);
+                    setActiveTab('documents');
+                }
                 loadSharedContracts();
                 loadActivities();
             }
@@ -138,15 +152,39 @@ function ClientDashboard({ user, onLogout }) {
         }
     };
 
+    const handleRejectContract = async (contractId, isMandate = false) => {
+        try {
+            const token = localStorage.getItem('token');
+            const endpoint = isMandate ? `/api/contracts/reject-mandate` : `/api/contracts/reject/${contractId}`;
+            const res = await fetch(`${API_URL}${endpoint}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
+            });
+            if (res.ok) {
+                loadSharedContracts();
+                loadActivities();
+            }
+        } catch (err) {
+            console.error('Reject contract error:', err);
+        }
+    };
+
+    const handleAcceptedNDA = (updatedUser) => {
+        setCurrentUser(updatedUser);
+        setActiveTab('documents');
+    };
+
+    // removed mandate overlay check
+
     return (
-        <Layout user={user} onLogout={onLogout} pageTitle="Client Portal">
+        <Layout user={currentUser} onLogout={onLogout} pageTitle="Client Portal">
             <div className="workspace-container">
                 <div className="workspace-header">
                     <div className="client-summary-card">
                         <div className="client-overview">
-                            <div className="client-avatar-large">{user.name.charAt(0)}</div>
+                            <div className="client-avatar-large">{currentUser?.name?.charAt(0) || 'U'}</div>
                             <div className="client-info">
-                                <h1>Welcome, {user.name}</h1>
+                                <h1>Welcome, {currentUser?.name || 'User'}</h1>
                                 <p>Client Portal - Manage your legal documents and communication</p>
                                 <div className="client-badges">
                                     <StatusBadge status="Active User" />
@@ -179,7 +217,7 @@ function ClientDashboard({ user, onLogout }) {
                                     <DocumentsTable
                                         documents={documents}
                                         loading={loading}
-                                        currentUser={user}
+                                        currentUser={currentUser}
                                         hideActions={true}
                                     />
                                 </div>
@@ -199,6 +237,7 @@ function ClientDashboard({ user, onLogout }) {
                                         contracts={sharedContracts}
                                         loading={sharedLoading}
                                         onAccept={handleAcceptContract}
+                                        onReject={handleRejectContract}
                                     />
                                 </div>
                             </div>
@@ -244,7 +283,7 @@ function ClientDashboard({ user, onLogout }) {
                                                         <span>Direct Message</span>
                                                     </div>
                                                 </div>
-                                                <ChatBox currentUser={user} recipientId={selectedRecipient.id} />
+                                                <ChatBox currentUser={currentUser} recipientId={selectedRecipient.id} />
                                             </>
                                         ) : (
                                             <div className="chat-placeholder">

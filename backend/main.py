@@ -275,13 +275,13 @@ def login(request: LoginRequest):
     try:
         conn = db_pool.getconn()
         with conn.cursor() as cur:
-            cur.execute("SELECT id, email, name, role, password_hash FROM users WHERE email = %s", (request.email,))
+            cur.execute("SELECT id, email, name, role, password_hash, nda_accepted FROM users WHERE email = %s", (request.email,))
             user_row = cur.fetchone()
             
         if not user_row:
             raise HTTPException(status_code=401, detail="Invalid credentials")
         
-        user_id, email, name, role, password_hash = user_row
+        user_id, email, name, role, password_hash, nda_accepted = user_row
         
         # Direct password comparison
         if password_hash == request.password:
@@ -293,7 +293,8 @@ def login(request: LoginRequest):
                     "id": user_id,
                     "name": name,
                     "email": email,
-                    "role": role
+                    "role": role,
+                    "nda_accepted": nda_accepted
                 }
             }
         raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -329,10 +330,10 @@ def create_client(client: ClientCreate, current_user: dict = Depends(verify_toke
             
             cur.execute(
                 """
-                INSERT INTO users (id, name, email, password_hash, role, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                INSERT INTO users (id, name, email, password_hash, role, nda_accepted, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (client_id, client.name, client.email, password, "client", created_at)
+                (client_id, client.name, client.email, password, "client", False, created_at)
             )
         conn.commit()
     except HTTPException: raise
@@ -1546,9 +1547,45 @@ def get_contracts_from_legal(current_user: dict = Depends(verify_token)):
     conn = db_pool.getconn()
     try:
         with conn.cursor() as cur:
+            # 1. Get explicitly shared contracts
             cur.execute("SELECT id, filename, document_type, shared_by, shared_by_email, message, size, status, shared_at, s3_key FROM shared_contracts WHERE client_id = %s ORDER BY shared_at DESC", (current_user["user_id"],))
             rows = cur.fetchall()
-            return {"contracts": [{"id": r[0], "filename": r[1], "document_type": r[2], "shared_by": r[3], "shared_by_email": r[4], "message": r[5], "size": r[6] or 0, "status": r[7], "shared_at": r[8].isoformat() if r[8] else None, "s3_key": r[9]} for r in rows]}
+            contracts = []
+            for r in rows:
+                contracts.append({
+                    "id": r[0], "filename": r[1], "document_type": r[2],
+                    "shared_by": r[3], "shared_by_email": r[4], "message": r[5],
+                    "size": r[6] or 0, "status": r[7], "shared_at": r[8].isoformat() if r[8] else None,
+                    "s3_key": r[9]
+                })
+
+            # Always inject the latest NDA for clients to show current status
+            cur.execute("SELECT nda_accepted, nda_rejected FROM users WHERE id = %s", (current_user["user_id"],))
+            user_nda = cur.fetchone()
+            if user_nda:
+                cur.execute(
+                    "SELECT id, filename, uploaded_at, size, s3_key FROM documents WHERE document_type = 'template' AND template_type = 'NDA' ORDER BY uploaded_at DESC LIMIT 1"
+                )
+                nda_row = cur.fetchone()
+                if nda_row:
+                    status = "pending_mandate"
+                    if user_nda[0]: status = "accepted"
+                    elif user_nda[1]: status = "rejected"
+                    
+                    contracts.insert(0, {
+                        "id": nda_row[0],
+                        "filename": nda_row[1],
+                        "shared_at": nda_row[2].isoformat() if nda_row[2] else None,
+                        "document_type": "NDA",
+                        "shared_by": "Legal Team", # Added back
+                        "shared_by_email": "legal@laccis.com", # Added back
+                        "message": "Mandatory NDA required for portal access. Please review and approve.", # Added back
+                        "status": status,
+                        "size": nda_row[3],
+                        "s3_key": nda_row[4],
+                        "is_mandate": True
+                    })
+            return {"contracts": contracts}
     finally: db_pool.putconn(conn)
 
 @app.post("/api/contracts/accept/{contract_id}")
@@ -1560,10 +1597,96 @@ def accept_shared_contract(contract_id: str, current_user: dict = Depends(verify
             row = cur.fetchone()
             if row:
                 conn.commit()
-                record_activity(current_user["user_id"], current_user["user_id"], "Accepted contract", row[0])
+                record_activity(current_user["user_id"], current_user["user_id"], "Accepted contract", f"Accepted shared contract: {row[0]}")
                 return {"message": "Accepted"}
             raise HTTPException(status_code=404)
     finally: db_pool.putconn(conn)
+
+@app.post("/api/contracts/reject/{contract_id}")
+def reject_shared_contract(contract_id: str, current_user: dict = Depends(verify_token)):
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("UPDATE shared_contracts SET status = 'rejected' WHERE id = %s AND client_id = %s RETURNING filename", (contract_id, current_user["user_id"]))
+            row = cur.fetchone()
+            if row:
+                conn.commit()
+                record_activity(current_user["user_id"], current_user["user_id"], "Rejected contract", f"Rejected shared contract: {row[0]}")
+                return {"message": "Rejected"}
+            raise HTTPException(status_code=404)
+    finally: db_pool.putconn(conn)
+
+
+@app.post("/api/contracts/accept-mandate")
+def accept_mandate_nda(current_user: dict = Depends(verify_token)):
+    if current_user["role"] != "client":
+        raise HTTPException(status_code=403, detail="Only clients can accept mandate NDA")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET nda_accepted = TRUE, nda_rejected = FALSE WHERE id = %s", (current_user["user_id"],))
+            conn.commit()
+            record_activity(current_user["user_id"], current_user["user_id"], "Approved Mandate NDA", "Client officially accepted the mandatory NDA.")
+            return {"message": "Mandate NDA accepted successfully"}
+    except Exception as e:
+        print(f"[ERROR] Accept mandate NDA error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
+
+@app.post("/api/contracts/reject-mandate")
+def reject_mandate_nda(current_user: dict = Depends(verify_token)):
+    if current_user["role"] != "client":
+        raise HTTPException(status_code=403, detail="Only clients can reject mandate NDA")
+    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("UPDATE users SET nda_accepted = FALSE, nda_rejected = TRUE WHERE id = %s", (current_user["user_id"],))
+            conn.commit()
+            record_activity(current_user["user_id"], current_user["user_id"], "Rejected Mandate NDA", "Client rejected the mandatory NDA.")
+            return {"message": "Mandate NDA rejected"}
+    except Exception as e:
+        print(f"[ERROR] Reject mandate NDA error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
+
+@app.get("/api/templates/latest-nda")
+def get_latest_nda_template(current_user: dict = Depends(verify_token)):
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, filename, uploaded_at, s3_key, s3_url FROM documents WHERE document_type = 'template' AND template_type = 'NDA' ORDER BY uploaded_at DESC LIMIT 1"
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="NDA template not found")
+            
+            return {
+                "id": row[0],
+                "filename": row[1],
+                "uploaded_at": row[2].isoformat() if row[2] else None,
+                "s3_key": row[3],
+                "s3_url": row[4]
+            }
+    except Exception as e:
+        print(f"[ERROR] Get latest NDA error: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 
@@ -1589,10 +1712,24 @@ def download_shared_contract(contract_id: str, current_user: dict = Depends(veri
     conn = db_pool.getconn()
     try:
         with conn.cursor() as cur:
+            # First check shared_contracts
             cur.execute("SELECT s3_key, client_id, file_path, filename FROM shared_contracts WHERE id = %s", (contract_id,))
             res = cur.fetchone()
-            if not res: raise HTTPException(status_code=404)
-            if current_user["role"] == "client" and res[1] != current_user["user_id"]: raise HTTPException(status_code=403)
+            
+            # If not found, check documents (for injected mandatory NDA templates)
+            if not res:
+                cur.execute("SELECT s3_key, user_id, file_path, filename FROM documents WHERE id = %s", (contract_id,))
+                res = cur.fetchone()
+                # For templates, we allow clients to download if it's currently injected as their mandate
+                # We can skip the strict client_id check for templates or perform a smarter check
+                if not res: raise HTTPException(status_code=404)
+            else:
+                # Regular shared contract check
+                if current_user["role"] == "client" and res[1] != current_user["user_id"]: 
+                    raise HTTPException(status_code=403)
+
+            record_activity(current_user["user_id"], current_user["user_id"], "Downloaded contract", f"Downloaded: {res[3]}")
+            
             s3_key = res[0]
             if s3_key:
                 try:

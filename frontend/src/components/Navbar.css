@@ -3,9 +3,8 @@
     justify-content: space-between;
     align-items: center;
     padding: 1rem 2rem;
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(10px);
-    border-bottom: 1px solid var(--glass-border);
+    background: #ffffff;
+    border-bottom: 1px solid #e2e8f0;
     margin-bottom: 2rem;
 }
 
