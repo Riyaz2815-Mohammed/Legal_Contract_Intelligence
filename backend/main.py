@@ -1517,7 +1517,13 @@ def startup_event():
     # load_model()
     print("[INFO] Application startup complete - Model will be loaded on first use")
 @app.post("/api/contracts/share-with-client")
-async def share_contract_with_client(file: UploadFile = File(...), client_id: str = Form(""), message: Optional[str] = Form(None), current_user: dict = Depends(verify_token)):
+async def share_contract_with_client(
+    file: UploadFile = File(...), 
+    client_id: str = Form(""), 
+    message: Optional[str] = Form(None), 
+    document_type: str = Form("PDF"),
+    current_user: dict = Depends(verify_token)
+):
     print(f"[SHARE] Role: {current_user.get('role')} | User: {current_user.get('email')} | ClientID: {client_id}")
     if current_user["role"] not in ["admin", "legal_team"]:
         print(f"✗ [SHARE] 403: Role {current_user['role']} not authorized")
@@ -1535,10 +1541,10 @@ async def share_contract_with_client(file: UploadFile = File(...), client_id: st
     conn = db_pool.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO shared_contracts (id, filename, shared_by, shared_by_email, client_id, message, status, shared_at, s3_key, file_path) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (contract_id, file.filename, current_user["user_id"], current_user.get("email", ""), client_id, message, 'pending_review', datetime.now(), s3_key, str(file_path)))
+            cur.execute("INSERT INTO shared_contracts (id, filename, shared_by, shared_by_email, client_id, message, status, shared_at, s3_key, file_path, document_type) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (contract_id, file.filename, current_user["user_id"], current_user.get("email", ""), client_id, message, 'pending_review', datetime.now(), s3_key, str(file_path), document_type))
             conn.commit()
-            record_activity(current_user["user_id"], client_id, "Shared contract", file.filename)
+            record_activity(current_user["user_id"], client_id, "Shared contract", f"{document_type}: {file.filename}")
             return {"message": "Shared", "id": contract_id}
     finally: db_pool.putconn(conn)
 
