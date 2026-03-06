@@ -42,9 +42,11 @@ export default function ClauseReview({ user, onLogout }) {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [activeTab, setActiveTab] = useState('All');
+    const [reprocessMsg, setReprocessMsg] = useState('');
+    const [sendingRedline, setSendingRedline] = useState(false);
+    const [redlineMsg, setRedlineMsg] = useState('');
 
-    // Master-Detail State
+    const [activeTab, setActiveTab] = useState('All');
     const [selectedClauseId, setSelectedClauseId] = useState(null);
 
     // Edit & Comment States
@@ -295,6 +297,30 @@ export default function ClauseReview({ user, onLogout }) {
         }
     };
 
+    const handleSendRedline = async () => {
+        setSendingRedline(true);
+        setRedlineMsg('');
+        try {
+            const token = localStorage.getItem('token');
+            const res = await fetch(`${API_URL}/api/documents/send-redline/${documentId}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` },
+            });
+            const d = await res.json();
+            if (res.ok) {
+                setRedlineMsg('✅ Redline sent to client!');
+                setTimeout(() => setRedlineMsg(''), 3000);
+            } else {
+                throw new Error(d.detail || 'Failed to send');
+            }
+        } catch (err) {
+            console.error('Send redline error', err);
+            alert(`Failed to send redline: ${err.message}`);
+        } finally {
+            setSendingRedline(false);
+        }
+    };
+
     // --- Render Helpers ---
 
     return (
@@ -314,7 +340,7 @@ export default function ClauseReview({ user, onLogout }) {
                         {counts.Medium > 0 && <button className={`tab-btn medium ${activeTab === 'Medium' ? 'active' : ''}`} onClick={() => setActiveTab('Medium')}>⚠ Medium Risk ({counts.Medium})</button>}
                         {counts.Low > 0 && <button className={`tab-btn low ${activeTab === 'Low' ? 'active' : ''}`} onClick={() => setActiveTab('Low')}>✓ Low Risk ({counts.Low})</button>}
 
-                        <div style={{ paddingLeft: '2rem', display: 'flex' }}>
+                        <div style={{ paddingLeft: '2rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
                             <button
                                 className="btn-action"
                                 style={{ backgroundColor: '#2563eb', color: 'white', padding: '0.4rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '500' }}
@@ -323,6 +349,18 @@ export default function ClauseReview({ user, onLogout }) {
                             >
                                 <span>📄</span> Download Redline (.docx)
                             </button>
+
+                            <button
+                                className="btn-action"
+                                style={{ backgroundColor: '#10b981', color: 'white', padding: '0.4rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '500', border: 'none', cursor: sendingRedline ? 'not-allowed' : 'pointer' }}
+                                onClick={handleSendRedline}
+                                disabled={sendingRedline || isProcessing}
+                            >
+                                {sendingRedline ? <div className="spinner-small" /> : <span>📤</span>}
+                                {sendingRedline ? 'Sending...' : 'Send Redline to Client'}
+                            </button>
+
+                            {redlineMsg && <span style={{ color: '#10b981', fontSize: '0.9rem', fontWeight: '500' }}>{redlineMsg}</span>}
                         </div>
                     </div>
                 </div>
@@ -519,13 +557,6 @@ export default function ClauseReview({ user, onLogout }) {
                                     </div>
                                     <div className="right-actions">
                                         {/* Reject explicitly removed by User Request */}
-                                        <button
-                                            className="btn-action btn-approve"
-                                            onClick={() => handleAction('accept')}
-                                            disabled={actionLoading || selectedClause.status === 'accepted'}
-                                        >
-                                            ✓ Approve
-                                        </button>
                                     </div>
                                 </div>
 

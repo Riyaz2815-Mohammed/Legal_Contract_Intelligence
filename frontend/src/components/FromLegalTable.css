@@ -86,3 +86,29 @@
     color: #b91c1c;
     border: 1px solid #fecaca;
 }
+
+.fl-type-badge.type-redlined {
+    background: #fdf2f2;
+    color: #ef4444;
+    border-color: #fecaca;
+}
+
+.spinner-small {
+    width: 1.1rem;
+    height: 1.1rem;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+    display: inline-block;
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+
+    to {
+        transform: rotate(360deg);
+    }
+}

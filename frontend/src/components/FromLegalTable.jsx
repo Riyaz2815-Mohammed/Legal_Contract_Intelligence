@@ -111,7 +111,7 @@ function FromLegalTable({ contracts, loading, onAccept, onReject }) {
                         <tr key={contract.id}>
                             <td className="fl-filename">{contract.filename}</td>
                             <td>
-                                <span className="fl-type-badge">
+                                <span className={`fl-type-badge ${contract.document_type === 'Redlined' ? 'type-redlined' : ''}`}>
                                     {contract.document_type || 'PDF'}
                                 </span>
                             </td>
@@ -129,7 +129,7 @@ function FromLegalTable({ contracts, loading, onAccept, onReject }) {
                                     >
                                         ⬇ Download
                                     </button>
-                                    {(contract.status === 'pending_review' || contract.status === 'pending_mandate') && (
+                                    {(contract.status === 'pending_review' || contract.status === 'pending_mandate' || contract.document_type === 'Redlined') && (
                                         <>
                                             <button
                                                 className="btn-action btn-approve"

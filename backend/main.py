@@ -1314,44 +1314,192 @@ def download_document(document_id: str, current_user: dict = Depends(verify_toke
         raise HTTPException(status_code=500, detail=f"S3 Error: {str(e)}")
 
 
-@app.post("/api/documents/share")
-def share_document(share_request: DocumentShare, current_user: dict = Depends(verify_token)):
+@app.post("/api/documents/send-redline/{document_id}")
+def send_redline_to_client(document_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(verify_token)):
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database not connected")
+    
     conn = None
     try:
         conn = db_pool.getconn()
         with conn.cursor() as cur:
-            # Fetch document
-            cur.execute("SELECT id, filename, user_id, shared_with FROM documents WHERE id = %s", (share_request.document_id,))
-            doc_row = cur.fetchone()
-            if not doc_row:
+            # 1. Fetch document metadata
+            cur.execute("SELECT id, filename, user_id FROM documents WHERE id = %s", (document_id,))
+            doc_res = cur.fetchone()
+            if not doc_res:
                 raise HTTPException(status_code=404, detail="Document not found")
+            original_id, original_filename, client_id = doc_res
             
-            doc_id, filename, doc_user_id, shared_with_db = doc_row
+            # 2. Fetch clauses + edits/comments in order
+            cur.execute(
+                """
+                SELECT c.content, e.edited_clause, e.comment
+                FROM clauses c
+                LEFT JOIN edited_clauses e ON c.content_id = e.content_id
+                WHERE c.document_id = %s
+                ORDER BY c.page_number ASC, c.ctid ASC
+                """,
+                (document_id,)
+            )
+            rows = cur.fetchall()
             
-            # Update shared_with list
-            shared_with = shared_with_db if isinstance(shared_with_db, list) else []
-            if share_request.share_with not in shared_with:
-                shared_with.append(share_request.share_with)
-                cur.execute("UPDATE documents SET shared_with = %s WHERE id = %s", (shared_with, share_request.document_id))
-                conn.commit()
-            
-            # Notify recipient
-            cur.execute("SELECT email FROM users WHERE id = %s", (share_request.share_with,))
-            user_res = cur.fetchone()
-            if user_res:
-                recipient_email = user_res[0]
-                email_body = f"<html><body><h2>Document Shared</h2><p>{filename} shared by {current_user['email']}</p></body></html>"
-                send_email(recipient_email, "Document Shared - LACCIS", email_body)
+            if not rows:
+                raise HTTPException(status_code=404, detail="No clauses found for this document")
 
-            return {"message": "Document shared successfully", "document": {"id": doc_id, "filename": filename, "user_id": doc_user_id, "shared_with": shared_with}}
+    except HTTPException:
+        raise
     except Exception as e:
-        print(f"[ERROR] Database share error: {e}")
+        print(f"[ERROR] Fetching redline data: {e}")
         if conn: conn.rollback()
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Database error")
     finally:
         if conn: db_pool.putconn(conn)
+
+    # 3. Generate Redlined Docx
+    try:
+        import docx
+    except ImportError:
+        raise HTTPException(status_code=500, detail="python-docx library not installed")
+
+    from docx.shared import RGBColor
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    import difflib
+    from datetime import datetime
+
+    document = docx.Document()
+    # Setup comments xml part
+    comments_part = None
+    try:
+        from docx.opc.part import XmlPart
+        from docx.oxml import parse_xml
+        from docx.opc.constants import RELATIONSHIP_TYPE, CONTENT_TYPE
+        from docx.opc.packuri import PackURI
+        
+        comments_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"></w:comments>'
+        comments_part = XmlPart(
+            PackURI('/word/comments.xml'), 
+            CONTENT_TYPE.WML_COMMENTS, 
+            parse_xml(comments_xml.encode('utf-8')), 
+            document.part.package
+        )
+        document.part.relate_to(comments_part, RELATIONSHIP_TYPE.COMMENTS)
+    except Exception as e:
+        print(f"[ERROR] Adding comments part: {e}")
+
+    comment_id_counter = 0
+
+    for idx, row in enumerate(rows):
+        original, edited, comment = row
+        p = document.add_paragraph()
+        
+        if not edited or edited == original:
+            p.add_run(original)
+        else:
+            seq = difflib.SequenceMatcher(None, original, edited)
+            for opcode, i1, i2, j1, j2 in seq.get_opcodes():
+                if opcode == 'equal':
+                    p.add_run(original[i1:i2])
+                elif opcode == 'delete':
+                    run = p.add_run(original[i1:i2])
+                    run.font.strike = True
+                    run.font.color.rgb = RGBColor(255, 0, 0)
+                elif opcode == 'insert':
+                    run = p.add_run(edited[j1:j2])
+                    run.font.color.rgb = RGBColor(255, 0, 0)
+                    run.font.underline = True
+                elif opcode == 'replace':
+                    run_del = p.add_run(original[i1:i2])
+                    run_del.font.strike = True
+                    run_del.font.color.rgb = RGBColor(255, 0, 0)
+                    run_ins = p.add_run(edited[j1:j2])
+                    run_ins.font.color.rgb = RGBColor(255, 0, 0)
+                    run_ins.font.underline = True
+
+        if comment and comments_part is not None:
+            comment_id_str = str(comment_id_counter)
+            comment_id_counter += 1
+            comment_elem = OxmlElement('w:comment')
+            comment_elem.set(qn('w:id'), comment_id_str)
+            comment_elem.set(qn('w:author'), "Legal Team")
+            c_p = OxmlElement('w:p')
+            c_r = OxmlElement('w:r')
+            c_t = OxmlElement('w:t')
+            c_t.text = comment
+            c_r.append(c_t)
+            c_p.append(c_r)
+            comment_elem.append(c_p)
+            comments_part.element.append(comment_elem)
+            comment_start = OxmlElement('w:commentRangeStart')
+            comment_start.set(qn('w:id'), comment_id_str)
+            p._p.insert(0, comment_start)
+            comment_end = OxmlElement('w:commentRangeEnd')
+            comment_end.set(qn('w:id'), comment_id_str)
+            p._p.append(comment_end)
+            comment_ref_r = OxmlElement('w:r')
+            comment_ref = OxmlElement('w:commentReference')
+            comment_ref.set(qn('w:id'), comment_id_str)
+            comment_ref_r.append(comment_ref)
+            p._p.append(comment_ref_r)
+            
+        if idx < len(rows) - 1:
+            document.add_paragraph()
+
+    # Save to temp file
+    import tempfile
+    import os
+    from fastapi.responses import JSONResponse
+    
+    fd, path = tempfile.mkstemp(suffix=".docx")
+    os.close(fd)
+    
+    document.save(path)
+    
+    # 4. Upload to S3
+    new_filename = f"Redlined_{original_filename.replace('.pdf', '').replace('.txt', '')}.docx"
+    s3_key = f"redline_{uuid.uuid4().hex[:8]}_{new_filename}"
+    s3_url = None
+    try:
+        with open(path, "rb") as f:
+            s3_client.put_object(Bucket=BUCKET_NAME, Key=s3_key, Body=f, ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        s3_url = f"https://{BUCKET_NAME}.s3.{AWS_REGION}.amazonaws.com/{s3_key}"
+    except Exception as e:
+        print(f"[ERROR] S3 Redline upload failed: {e}")
+        # Continue anyway, file sits locally? No, we need S3 for the client to download
+        raise HTTPException(status_code=500, detail="Failed to upload redline to S3")
+    
+    # 5. Store in shared_contracts
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            contract_id = f"sc-{uuid.uuid4().hex[:8]}"
+            cur.execute(
+                """
+                INSERT INTO shared_contracts (id, filename, shared_by, shared_by_email, client_id, message, status, shared_at, s3_key, s3_url, file_path, document_type)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    contract_id, new_filename, current_user["user_id"], current_user.get("email", ""),
+                    client_id, f"Redlined version of {original_filename}", 'pending_review',
+                    datetime.now(), s3_key, s3_url, path, 'Redlined'
+                )
+            )
+            conn.commit()
+            record_activity(current_user["user_id"], client_id, "Sent redline to client", new_filename)
+            return {"message": "Redline sent to client successfully", "id": contract_id}
+    except Exception as e:
+        print(f"[ERROR] DB shared_contracts insert failed: {e}")
+        conn.rollback()
+        raise HTTPException(status_code=500, detail="Failed to record shared contract")
+    finally:
+        db_pool.putconn(conn)
+        # We don't remove the file yet if it's referenced in shared_contracts? 
+        # Actually, if we use S3, we can remove it. But schema.sql has file_path too.
+        # I'll leave it for now or delete it if S3 is reliable.
+        # os.remove(path)
+
 
 
 @app.post("/api/documents/approve/{document_id}")
