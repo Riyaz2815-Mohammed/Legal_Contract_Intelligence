@@ -1,22 +1,19 @@
 import psycopg2
 import pandas as pd
-from langchain_community.vectorstores import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings   # fixed: langchain_community deprecated
-from langchain_core.documents import Document
+from langchain_huggingface import HuggingFaceEmbeddings
+from pgvector.psycopg2 import register_vector
 
 from vector_pipeline.config.settings import (
     DATABASE_URL,
     EMBEDDING_MODEL,
     EMBEDDING_DEVICE,
-    EMBEDDING_NORMALIZE,
-    CHROMA_PERSIST_DIR,
-    CHROMA_COLLECTION
+    EMBEDDING_NORMALIZE
 )
 
 import logging
 logger = logging.getLogger(__name__)
 
-# ── Module-level model cache so we don't reload on every clause ───────────────
+# ── Module-level model cache ──────────────────────────────────────────────────
 _embedding_model = None
 
 
@@ -53,71 +50,78 @@ def fetch_legal_clauses() -> pd.DataFrame:
             conn.close()
 
 
-def build_documents(df: pd.DataFrame) -> list[Document]:
-    docs = []
-    for _, row in df.iterrows():
-        doc = Document(
-            page_content=row["content"],
-            metadata={
-                "clause_id":   str(row["clause_id"]),
-                "clause":      str(row["clause"]),
-                "content_id":  str(row["content_id"]),
-                "source":      str(row["source"]),
-                "page_number": str(row["page_number"]),
-                "document":    str(row["document"]),
-                "document_id": str(row["document_id"]),
-                "created_at":  str(row["created_at"])
-            }
-        )
-        docs.append(doc)
-    logger.info(f"Prepared {len(docs)} documents")
-    return docs
-
-
-def embed_and_store(docs: list[Document], embedding_model) -> Chroma:
+def store_clause_embedding(conn, clause_data: dict, embedding: list):
+    """
+    Insert or update a clause embedding in Supabase pgvector table.
+    """
     try:
-        vectorstore = Chroma.from_documents(
-            documents=docs,
-            embedding=embedding_model,
-            persist_directory=CHROMA_PERSIST_DIR,
-            collection_name=CHROMA_COLLECTION
-        )
-        # NOTE: .persist() was removed in ChromaDB ≥ 0.4 — data is auto-persisted
-        logger.info("✅ Embedded and stored in ChromaDB")
-        return vectorstore
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO clause_embeddings (
+                    clause_id, clause, content_id, content, embedding, 
+                    document, document_id, page_number, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (content_id) DO UPDATE SET
+                    clause = EXCLUDED.clause,
+                    content = EXCLUDED.content,
+                    embedding = EXCLUDED.embedding,
+                    document = EXCLUDED.document,
+                    document_id = EXCLUDED.document_id,
+                    page_number = EXCLUDED.page_number,
+                    created_at = EXCLUDED.created_at
+            """, (
+                clause_data["clause_id"],
+                clause_data["clause"],
+                clause_data["content_id"],
+                clause_data["content"],
+                embedding,
+                clause_data["document"],
+                clause_data["document_id"],
+                clause_data["page_number"],
+                clause_data["created_at"]
+            ))
     except Exception as e:
-        logger.error(f"Error storing in ChromaDB: {e}")
+        logger.error(f"Error storing embedding: {e}")
         raise
-
-
-def load_vectorstore(embedding_model) -> Chroma:
-    return Chroma(
-        persist_directory=CHROMA_PERSIST_DIR,
-        embedding_function=embedding_model,
-        collection_name=CHROMA_COLLECTION
-    )
 
 
 def run_embed_pipeline():
     """
-    Wipe ChromaDB and re-embed ALL legal clauses from DB.
-    Called automatically after any legal template upload so the vectorstore
-    always reflects the current, correctly-classified clause set.
+    Wipe clause_embeddings table and re-embed ALL legal clauses from DB.
     """
-    import shutil
-    from pathlib import Path
-
-    # Wipe stale ChromaDB so old incorrectly-classified blobs don't stick around
-    chroma_path = Path(CHROMA_PERSIST_DIR)
-    if chroma_path.exists():
-        shutil.rmtree(chroma_path)
-        logger.info(f"[Embed] Wiped old ChromaDB at {chroma_path}")
-
     embedding_model = get_embedding_model()
     df = fetch_legal_clauses()
+    
     if df.empty:
-        logger.warning("[Embed] No legal clauses in DB — ChromaDB not updated.")
+        logger.warning("[Embed] No legal clauses in DB — pgvector not updated.")
         return
-    docs = build_documents(df)
-    vs = embed_and_store(docs, embedding_model)
-    logger.info(f"✅ Embed pipeline complete — {vs._collection.count()} chunks in ChromaDB")
+
+    conn = None
+    try:
+        conn = psycopg2.connect(DATABASE_URL)
+        register_vector(conn)
+        
+        with conn.cursor() as cur:
+            cur.execute("TRUNCATE TABLE clause_embeddings")
+            logger.info("[Embed] Wiped old embeddings in Supabase")
+
+        count = 0
+        for _, row in df.iterrows():
+            # Generate embedding
+            embedding = embedding_model.embed_query(row["content"])
+            
+            # Store in Supabase
+            store_clause_embedding(conn, row.to_dict(), embedding)
+            count += 1
+            
+        conn.commit()
+        logger.info(f"✅ Embed pipeline complete — {count} clauses stored in Supabase pgvector")
+        
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        logger.error(f"Error in embed pipeline: {e}")
+        raise
+    finally:
+        if conn:
+            conn.close()

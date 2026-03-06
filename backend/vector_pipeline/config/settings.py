@@ -18,10 +18,9 @@ EMBEDDING_MODEL = os.getenv("MODEL_NAME", "all-MiniLM-L6-v2")
 EMBEDDING_DEVICE = "cpu"
 EMBEDDING_NORMALIZE = True
 
-# ChromaDB
-backend_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-CHROMA_PERSIST_DIR = os.path.join(backend_dir, "data", "chroma_legal_db")
-CHROMA_COLLECTION = "legal_clauses"
+# ChromaDB (REPLACED BY SUPABASE PGVECTOR)
+# CHROMA_PERSIST_DIR = os.path.join(backend_dir, "data", "chroma_legal_db")
+# CHROMA_COLLECTION = "legal_clauses"
 
 # Pipeline
 TOP_K = 5
