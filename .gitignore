@@ -16,3 +16,14 @@ backend/data/
 backend/chroma_db/
 extracter/extracted_texts/
 backend/reviews/
+
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs
+dist/
+
+# IDEs
+.vscode/
+.idea/
