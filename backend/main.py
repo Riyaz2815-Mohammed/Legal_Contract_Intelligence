@@ -547,11 +547,12 @@ def delete_client(client_id: str, current_user: dict = Depends(verify_token)):
 
 
 
-def trigger_extraction(file_name: str, document_type: str = "Unknown", source: str = "unknown"):
+def trigger_extraction(file_name: str, document_id: str, document_type: str = "Unknown", source: str = "unknown"):
     """Background task: perform extraction and classification locally.
 
     Args:
         file_name     : saved filename under data/uploads/
+        document_id   : actual database ID for the document
         document_type : e.g. "NDA", "MSA", "SOW" — stored in every clause record
         source        : "client" or "legal" — who uploaded the document
     """
@@ -605,10 +606,7 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
             if db_pool:
                 conn = db_pool.getconn()
                 with conn.cursor() as cur:
-                    # Find corresponding document_id by s3_key matching file_name
-                    cur.execute("SELECT id FROM documents WHERE s3_key = %s LIMIT 1", (file_name,))
-                    doc_res = cur.fetchone()
-                    document_id = doc_res[0] if doc_res else None
+                    # Using passed document_id directly
 
                     if source == "legal":
                         # ── Legal templates: store EACH parsed section individually ──────────
@@ -829,8 +827,12 @@ async def upload_document(
     # All document types are allowed without restriction
     print(f"📄 User {current_user['user_id']} uploading {document_type}")
     
-    # Save file
-    file_name = f"{current_user['user_id']}_{file.filename}"
+    # Determine status and ID early
+    status = "pending" if document_type.startswith("NDA") else "uploaded"
+    doc_uuid = f"doc-{uuid.uuid4().hex[:8]}"
+
+    # Save file with unique ID in name to avoid S3 collisions
+    file_name = f"{doc_uuid}_{file.filename}"
     file_path = UPLOADS_DIR / file_name
     
     with open(file_path, "wb") as f:
@@ -886,8 +888,6 @@ async def upload_document(
             if temp_conn: db_pool.putconn(temp_conn)
 
     # Determine status based on document type
-    status = "pending" if document_type.startswith("NDA") else "uploaded"
-    doc_uuid = f"doc-{uuid.uuid4().hex[:8]}"
     
     new_doc = {
         "id": doc_uuid,
@@ -942,7 +942,7 @@ async def upload_document(
         if is_redlined:
             print(f"📄 [SKIP] Extraction skipped for redlined document: {file_name}")
         else:
-            background_tasks.add_task(trigger_extraction, file_name, document_type, source)
+            background_tasks.add_task(trigger_extraction, file_name, doc_uuid, document_type, source)
     
     return {
         "message": "Document uploaded and queued for extraction",
