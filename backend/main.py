@@ -1,4 +1,9 @@
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status, BackgroundTasks, Form
+import os
+
+# --- Fix for WinError 1114 (Torch DLL crash on Windows) ---
+# Force torch to use CPU to avoid DLL initialization conflicts with GPU drivers
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
@@ -799,7 +804,8 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
             try:
                 update_conn = db_pool.getconn()
                 with update_conn.cursor() as cur:
-                    cur.execute("UPDATE documents SET status = 'completed' WHERE id = %s", (document_id,))
+                    # Using 'uploaded' instead of 'completed' to satisfy DB CHECK constraint
+                    cur.execute("UPDATE documents SET status = 'uploaded' WHERE id = %s", (document_id,))
                 update_conn.commit()
                 print(f"[SUCCESS] [Background] Document status marked as 'completed' for {document_id}")
             except Exception as e:
