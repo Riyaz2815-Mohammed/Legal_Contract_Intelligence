@@ -27,6 +27,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
     const [shareLoading, setShareLoading] = useState(false);
     const [shareSuccess, setShareSuccess] = useState('');
     const [shareError, setShareError] = useState('');
+    const [selectedContractType, setSelectedContractType] = useState('NDA');
     const fileInputRef = useRef(null);
 
     const loadData = async () => {
@@ -187,6 +188,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
             const formData = new FormData();
             formData.append('file', shareFile);
             formData.append('client_id', clientId);
+            formData.append('document_type', selectedContractType);
             if (shareMessage.trim()) formData.append('message', shareMessage.trim());
 
             const res = await fetch(`${API_URL}/api/contracts/share-with-client`, {
@@ -312,6 +314,23 @@ const ClientWorkspace = ({ user, onLogout }) => {
                                 </div>
 
                                 <div className="workspace-card share-card">
+                                    {/* Contract Type Dropdown */}
+                                    <div className="share-notes-section" style={{ marginBottom: '1.5rem' }}>
+                                        <label className="share-label">Select Contract Type</label>
+                                        <select
+                                            className="share-textarea"
+                                            style={{ height: 'auto', padding: '0.75rem' }}
+                                            value={selectedContractType}
+                                            onChange={(e) => setSelectedContractType(e.target.value)}
+                                        >
+                                            <option value="NDA">NDA</option>
+                                            <option value="RA">RA</option>
+                                            <option value="SOW">SOW</option>
+                                            <option value="MSA">MSA</option>
+                                            <option value="Vendor Agreement">Vendor Agreement</option>
+                                        </select>
+                                    </div>
+
                                     {/* Drag & Drop Area */}
                                     <div
                                         className={`share-dropzone${shareDragging ? ' dragging' : ''}${shareFile ? ' has-file' : ''}`}
