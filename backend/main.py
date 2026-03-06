@@ -681,11 +681,9 @@ def trigger_extraction(file_name: str, document_type: str = "Unknown", source: s
         try:
             if source == "legal":
                 from vector_pipeline.embeddings.embed_store import run_embed_pipeline
-                import vector_pipeline.pipeline.full_pipeline as _fp
-                print(f"[INFO] [Background] Standard template '{file_name}' — updating ChromaDB...")
+                print(f"[INFO] [Background] Standard template '{file_name}' — updating Supabase pgvector...")
                 run_embed_pipeline()
-                _fp._vectorstore = None  # reset cache so next client doc picks up new templates
-                print(f"[SUCCESS] [Background] ChromaDB updated with new standard template clauses.")
+                print(f"[SUCCESS] [Background] Supabase pgvector updated with new standard template clauses.")
             
             elif source == "client" and document_id:
                 from vector_pipeline.pipeline.full_pipeline import run_pipeline
