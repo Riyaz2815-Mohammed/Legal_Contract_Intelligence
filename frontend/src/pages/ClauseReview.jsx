@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../layouts/Layout';
 import DocumentChatbot from '../components/DocumentChatbot';
@@ -29,11 +29,39 @@ const RISK_CONFIG = {
     Low: { class: 'low', icon: '🟢', barColor: '#10b981' },
 };
 
-// Normalise risk strings coming from backend ('high' → 'High')
 const normalizeRisk = (r) => {
     if (!r) return 'High';
     return r.charAt(0).toUpperCase() + r.slice(1).toLowerCase();
 };
+
+/* ── Suggestion diff preview helper (Granular) ───────────────── */
+function buildSuggestionPreviewHtml(original, suggested, changeType) {
+    if (changeType === 'insert') return `<ins class="tc-ins">${suggested}</ins>`;
+    if (changeType === 'delete') return `<del class="tc-del">${original}</del>`;
+
+    // Replace: Use granular diff to avoid striking out whole clause
+    if (!original) return `<ins class="tc-ins">${suggested}</ins>`;
+    if (!suggested) return `<del class="tc-del">${original}</del>`;
+
+    const a = original.split(/(\s+)/);
+    const b = suggested.split(/(\s+)/);
+
+    let i = 0;
+    while (i < a.length && i < b.length && a[i] === b[i]) i++;
+    let j = 0;
+    while (j < a.length - i && j < b.length - i && a[a.length - 1 - j] === b[b.length - 1 - j]) j++;
+
+    const prefix = a.slice(0, i).join('');
+    const suffix = a.slice(a.length - j).join('');
+    const delText = a.slice(i, a.length - j).join('');
+    const insText = b.slice(i, b.length - j).join('');
+
+    let mid = "";
+    if (delText) mid += `<del class="tc-del">${delText}</del>`;
+    if (insText) mid += `<ins class="tc-ins">${insText}</ins>`;
+
+    return prefix + mid + suffix;
+}
 
 export default function ClauseReview({ user, onLogout }) {
     const { documentId } = useParams();
@@ -42,25 +70,28 @@ export default function ClauseReview({ user, onLogout }) {
     const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [reprocessMsg, setReprocessMsg] = useState('');
     const [sendingRedline, setSendingRedline] = useState(false);
     const [redlineMsg, setRedlineMsg] = useState('');
 
     const [activeTab, setActiveTab] = useState('All');
     const [selectedClauseId, setSelectedClauseId] = useState(null);
 
-    // Edit & Comment States
-    const [isEditing, setIsEditing] = useState(false);
-    const [editValue, setEditValue] = useState('');
+    // Suggestion mode states
+    const [isSuggesting, setIsSuggesting] = useState(false);
+    const [suggestionDraft, setSuggestionDraft] = useState('');
+
+    // Comment states (kept)
     const [isCommenting, setIsCommenting] = useState(false);
     const [commentValue, setCommentValue] = useState('');
 
-    // Action Loading states
-    const [actionLoading, setActionLoading] = useState(false);
-
-    // LLM State
+    // LLM state
     const [llmLoading, setLlmLoading] = useState(false);
     const [llmAnswer, setLlmAnswer] = useState('');
+
+    // Action loading per suggestion id  { [sugId]: true|false }
+    const [sugActionLoading, setSugActionLoading] = useState({});
+    // Global action loading
+    const [actionLoading, setActionLoading] = useState(false);
 
     const fetchReview = useCallback(async () => {
         try {
@@ -83,9 +114,8 @@ export default function ClauseReview({ user, onLogout }) {
         return null;
     }, [documentId]);
 
-    const isPollingRef = React.useRef(false);
+    const isPollingRef = useRef(false);
 
-    // Risk summary counts
     const counts = useMemo(() => {
         const clauses = data?.clauses || [];
         return clauses.reduce((acc, c) => {
@@ -95,7 +125,6 @@ export default function ClauseReview({ user, onLogout }) {
         }, {});
     }, [data]);
 
-    // Filtered clauses
     const filteredClauses = useMemo(() => {
         const clauses = data?.clauses || [];
         return clauses.filter(c => {
@@ -104,18 +133,14 @@ export default function ClauseReview({ user, onLogout }) {
         });
     }, [data, activeTab]);
 
-    // Currently selected clause object
     const selectedClause = useMemo(() => {
         return filteredClauses.find(c => c.content_id === selectedClauseId) || filteredClauses[0];
     }, [filteredClauses, selectedClauseId]);
 
-    // Force selection of first available item if selected isn't in filtered list
     useEffect(() => {
         if (filteredClauses.length > 0 && selectedClauseId) {
             const exists = filteredClauses.some(c => c.content_id === selectedClauseId);
-            if (!exists) {
-                setSelectedClauseId(filteredClauses[0].content_id);
-            }
+            if (!exists) setSelectedClauseId(filteredClauses[0].content_id);
         } else if (filteredClauses.length > 0 && !selectedClauseId) {
             setSelectedClauseId(filteredClauses[0].content_id);
         }
@@ -124,21 +149,16 @@ export default function ClauseReview({ user, onLogout }) {
     useEffect(() => {
         let isMounted = true;
         let pollTimer = null;
-
         const poll = async () => {
             if (!isMounted || isPollingRef.current) return;
             isPollingRef.current = true;
-
             const status = await fetchReview();
             isPollingRef.current = false;
-
             if (isMounted && status === 'processing') {
                 pollTimer = setTimeout(poll, 5000);
             }
         };
-
         poll();
-
         return () => {
             isMounted = false;
             if (pollTimer) clearTimeout(pollTimer);
@@ -195,25 +215,51 @@ export default function ClauseReview({ user, onLogout }) {
         }
     };
 
-    const saveEdit = async () => {
-        if (!selectedClause) return;
+    /* ── Suggestion submit ─────────────────────────────────────── */
+    const submitSuggestion = async () => {
+        if (!selectedClause || !suggestionDraft.trim()) return;
         setActionLoading(true);
         try {
             const token = localStorage.getItem('token');
-            await fetch(`${API_URL}/api/documents/review/${documentId}/edit`, {
+            const original = selectedClause.edited_content || selectedClause.content;
+            await fetch(`${API_URL}/api/documents/review/${documentId}/suggest`, {
                 method: 'POST',
                 headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content_id: selectedClause.content_id, edited_content: editValue }),
+                body: JSON.stringify({
+                    content_id: selectedClause.content_id,
+                    original_text: original,
+                    suggested_text: suggestionDraft,
+                }),
             });
+            setSuggestionDraft('');
+            setIsSuggesting(false);
             await fetchReview();
-            setIsEditing(false);
         } catch (err) {
-            console.error('Edit error', err);
+            console.error('Submit suggestion error', err);
         } finally {
             setActionLoading(false);
         }
     };
 
+    /* ── Suggestion accept / reject ────────────────────────────── */
+    const handleSuggestionAction = async (sugId, action) => {
+        setSugActionLoading(prev => ({ ...prev, [sugId]: true }));
+        try {
+            const token = localStorage.getItem('token');
+            await fetch(`${API_URL}/api/documents/review/${documentId}/suggestion-action`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
+                body: JSON.stringify({ suggestion_id: sugId, action }),
+            });
+            await fetchReview();
+        } catch (err) {
+            console.error('Suggestion action error', err);
+        } finally {
+            setSugActionLoading(prev => ({ ...prev, [sugId]: false }));
+        }
+    };
+
+    /* ── Comment save ──────────────────────────────────────────── */
     const saveComment = async () => {
         if (!selectedClause) return;
         setActionLoading(true);
@@ -268,18 +314,12 @@ export default function ClauseReview({ user, onLogout }) {
                 throw new Error(text || 'Download failed');
             }
             const blob = await res.blob();
-
-            // Get filename from Content-Disposition if available, or generate one
             const contentDisposition = res.headers.get('Content-Disposition');
             let filename = `Redlined_Document.docx`;
             if (contentDisposition) {
                 const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-                if (filenameMatch && filenameMatch.length === 2) {
-                    filename = filenameMatch[1];
-                }
+                if (filenameMatch && filenameMatch.length === 2) filename = filenameMatch[1];
             }
-
-            // Create object URL and trigger download
             const url = window.URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.style.display = 'none';
@@ -321,251 +361,249 @@ export default function ClauseReview({ user, onLogout }) {
         }
     };
 
-    // --- Render Helpers ---
+    const startSuggesting = () => {
+        if (!selectedClause) return;
+        setSuggestionDraft(selectedClause.edited_content || selectedClause.content);
+        setIsSuggesting(true);
+    };
 
+    const askAI = () => {
+        const chatbotInput = document.querySelector('.chat-input textarea');
+        if (chatbotInput) {
+            chatbotInput.focus();
+            chatbotInput.scrollIntoView({ behavior: 'smooth' });
+        }
+    };
+
+    /* ── Pending suggestion count helper ───────────────────────── */
+    const getPendingCount = (clause) => {
+        return (clause.suggestions || []).filter(s => s.status === 'pending').length;
+    };
+
+    /* ── Render ─────────────────────────────────────────────────── */
     return (
         <Layout user={user} onLogout={onLogout} pageTitle="Clause Review">
             <div className="review-page master-detail-mode">
 
-                {/* Header & Global Tab Filters */}
-                <div className="md-header">
-                    <button className="md-btn-back" onClick={() => navigate(-1)}>← Back</button>
-                    <h2>Contract Clause Review</h2>
-
-                    <div className="md-risk-tabs">
-                        <button className={`tab-btn ${activeTab === 'All' ? 'active' : ''}`} onClick={() => setActiveTab('All')}>
-                            All ({clauses.length})
-                        </button>
-                        {counts.High > 0 && <button className={`tab-btn high ${activeTab === 'High' ? 'active' : ''}`} onClick={() => setActiveTab('High')}>⊗ High Risk ({counts.High})</button>}
-                        {counts.Medium > 0 && <button className={`tab-btn medium ${activeTab === 'Medium' ? 'active' : ''}`} onClick={() => setActiveTab('Medium')}>⚠ Medium Risk ({counts.Medium})</button>}
-                        {counts.Low > 0 && <button className={`tab-btn low ${activeTab === 'Low' ? 'active' : ''}`} onClick={() => setActiveTab('Low')}>✓ Low Risk ({counts.Low})</button>}
-
-                        <div style={{ paddingLeft: '2rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                            <button
-                                className="btn-action"
-                                style={{ backgroundColor: '#2563eb', color: 'white', padding: '0.4rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '500' }}
-                                onClick={handleDownloadRedline}
-                                disabled={actionLoading || isProcessing}
-                            >
-                                <span>📄</span> Download Redline (.docx)
-                            </button>
-
-                            <button
-                                className="btn-action"
-                                style={{ backgroundColor: '#10b981', color: 'white', padding: '0.4rem 1rem', display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: '500', border: 'none', cursor: sendingRedline ? 'not-allowed' : 'pointer' }}
-                                onClick={handleSendRedline}
-                                disabled={sendingRedline || isProcessing}
-                            >
-                                {sendingRedline ? <div className="spinner-small" /> : <span>📤</span>}
-                                {sendingRedline ? 'Sending...' : 'Send Redline to Client'}
-                            </button>
-
-                            {redlineMsg && <span style={{ color: '#10b981', fontSize: '0.9rem', fontWeight: '500' }}>{redlineMsg}</span>}
+                {/* Header & Horizontal Clause Tabs */}
+                <div className="md-header-redesign">
+                    <div className="md-header-top">
+                        <button className="md-btn-back" onClick={() => navigate(-1)}>← Back</button>
+                        <h2>Contract Clause Review</h2>
+                        <div className="md-risk-filters">
+                            <button className={`filter-pill ${activeTab === 'All' ? 'active' : ''}`} onClick={() => setActiveTab('All')}>All ({data?.clauses?.length || 0})</button>
+                            {counts.High > 0 && <button className={`filter-pill high ${activeTab === 'High' ? 'active' : ''}`} onClick={() => setActiveTab('High')}>High Risk ({counts.High})</button>}
+                            {counts.Medium > 0 && <button className={`filter-pill medium ${activeTab === 'Medium' ? 'active' : ''}`} onClick={() => setActiveTab('Medium')}>Medium Risk ({counts.Medium})</button>}
+                            {counts.Low > 0 && <button className={`filter-pill low ${activeTab === 'Low' ? 'active' : ''}`} onClick={() => setActiveTab('Low')}>Low Risk ({counts.Low})</button>}
                         </div>
+                    </div>
+
+                    <div className="md-horizontal-clauses larger-tabs">
+                        {filteredClauses.map(c => {
+                            const r = normalizeRisk(c.risk);
+                            const isSelected = selectedClause && selectedClause.content_id === c.content_id;
+                            const pendingCount = getPendingCount(c);
+                            return (
+                                <button
+                                    key={c.content_id}
+                                    className={`clause-tab ${isSelected ? 'active' : ''} risk-${r.toLowerCase()}`}
+                                    onClick={() => {
+                                        setSelectedClauseId(c.content_id);
+                                        setLlmAnswer('');
+                                        setIsSuggesting(false);
+                                        setIsCommenting(false);
+                                    }}
+                                >
+                                    <span className="tab-name">{c.clause_type}</span>
+                                    <span className={`tab-risk-badge ${r.toLowerCase()}`}>{r} Risk</span>
+                                    {pendingCount > 0 && <span className="tab-sug-badge">{pendingCount}</span>}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 
                 <div className="md-layout">
-                    {/* Left Sidebar Navigation */}
-                    <div className="md-sidebar">
-                        <h3 className="sidebar-title">Clauses</h3>
-                        {filteredClauses.length === 0 ? (
-                            <div className="sidebar-empty">
-                                {isProcessing ? (
-                                    <div style={{ textAlign: 'center', padding: '1rem' }}>
-                                        <div className="spinner" style={{ margin: '0 auto 0.75rem' }} />
-                                        <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Analysing document…</p>
-                                    </div>
-                                ) : (
-                                    <p>No clauses found.</p>
-                                )}
-                            </div>
-                        ) : (
-                            <div className="sidebar-list">
-                                {filteredClauses.map(c => {
-                                    const r = normalizeRisk(c.risk);
-                                    const rc = RISK_CONFIG[r];
-                                    const isSelected = selectedClause && selectedClause.content_id === c.content_id;
-                                    return (
-                                        <div
-                                            key={c.content_id}
-                                            className={`sidebar-item ${isSelected ? 'selected' : ''} risk-${rc.class}`}
-                                            onClick={() => {
-                                                setSelectedClauseId(c.content_id);
-                                                setLlmAnswer('');
-                                                setIsEditing(false);
-                                                setIsCommenting(false);
-                                            }}
-                                        >
-                                            <div className="item-lhs">
-                                                <div className="item-title">{c.clause_type}</div>
-                                                <div className="item-meta">Page {c.page_number}</div>
-                                            </div>
-                                            <div className={`item-risk-pill ${rc.class}`}>
-                                                {r} Risk
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </div>
-
-                    {/* Right Detail Pane */}
                     <div className="md-detail">
                         {!selectedClause ? (
-                            <div className="detail-empty">Select a clause from the sidebar to begin review.</div>
+                            <div className="detail-empty">Select a clause above to begin review.</div>
                         ) : (
-                            <div className={`detail-card risk-${RISK_CONFIG[normalizeRisk(selectedClause.risk || 'High')].class}`}>
-
-                                {/* Detail Header */}
+                            <div className={`detail-card risk-${normalizeRisk(selectedClause.risk).toLowerCase()}`}>
                                 <div className="detail-header">
-                                    <div>
+                                    <div className="detail-title-area">
                                         <h3>{selectedClause.clause_type}</h3>
-                                        <span className="detail-meta">Page {selectedClause.page_number}</span>
+                                        <div className="detail-meta">
+                                            <span>Page {selectedClause.page_number}</span>
+                                        </div>
                                     </div>
                                     <div className="detail-status-area">
-                                        <span className={`detail-risk-pill ${RISK_CONFIG[normalizeRisk(selectedClause.risk || 'High')].class}`}>
+                                        <span className={`detail-risk-pill ${normalizeRisk(selectedClause.risk).toLowerCase()}`}>
                                             {normalizeRisk(selectedClause.risk)} Risk
                                         </span>
-                                        {selectedClause.similarity_score !== null && (
-                                            <span className="detail-confidence">
-                                                {Math.round(selectedClause.similarity_score * 100)}% match
-                                            </span>
-                                        )}
-                                        {selectedClause.status === 'accepted' && (
-                                            <span className="detail-approved-badge">✓ Approved</span>
+                                        <span className="detail-confidence">
+                                            {Math.round((selectedClause.risk_confidence || selectedClause.similarity_score || 0) * 100)}% Confidence
+                                        </span>
+                                        {selectedClause.approval_status === 'approved' && (
+                                            <span className="detail-approved-badge">Approved</span>
                                         )}
                                     </div>
                                 </div>
 
-                                {/* Comparison Panes */}
                                 <div className="comparison-box">
-
-                                    {/* Left: Client Contract */}
                                     <div className="comp-pane upload-pane">
-                                        <div className="pane-title">📄 Uploaded Contract</div>
-                                        <div className="pane-content" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                                            <div className="clause-edit-section">
-                                                {isEditing ? (
-                                                    <div className="edit-mode-container">
-                                                        <textarea
-                                                            className="edit-textarea"
-                                                            value={editValue}
-                                                            onChange={e => setEditValue(e.target.value)}
-                                                            rows={6}
-                                                        />
-                                                        <div className="edit-actions">
-                                                            <button className="btn-save btn-small" onClick={saveEdit}>Save Edit</button>
-                                                            <button className="btn-cancel btn-small" onClick={() => setIsEditing(false)}>Cancel</button>
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <div className="text-display">
-                                                        {selectedClause.html_diff ? (
-                                                            <span dangerouslySetInnerHTML={{ __html: selectedClause.html_diff }} />
-                                                        ) : (
-                                                            selectedClause.content
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-
-                                            <div className="clause-comment-section" style={{ borderTop: '1px solid #e2e8f0', paddingTop: '1rem' }}>
-                                                <div style={{ fontWeight: '600', marginBottom: '0.5rem', color: '#475569' }}>Legal Note / Comment:</div>
-                                                {isCommenting ? (
-                                                    <div className="comment-mode-container">
-                                                        <textarea
-                                                            className="comment-input"
-                                                            style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #cbd5e1', minHeight: '60px', resize: 'vertical' }}
-                                                            value={commentValue}
-                                                            onChange={e => setCommentValue(e.target.value)}
-                                                            placeholder="Add a comment..."
-                                                        />
-                                                        <div className="edit-actions" style={{ marginTop: '0.5rem' }}>
-                                                            <button className="btn-save btn-small" onClick={saveComment}>Save Comment</button>
-                                                            <button className="btn-cancel btn-small" onClick={() => {
-                                                                setCommentValue(selectedClause.comment || '');
-                                                                setIsCommenting(false);
-                                                            }}>Cancel</button>
-                                                        </div>
-                                                    </div>
-                                                ) : (
-                                                    <div className="clause-comment-display" style={{ padding: '0.75rem', backgroundColor: '#f8fafc', borderRadius: '4px', border: '1px solid #e2e8f0', cursor: 'pointer' }} onClick={() => {
-                                                        setCommentValue(selectedClause.comment || '');
-                                                        setIsCommenting(true);
-                                                    }}>
-                                                        {selectedClause.comment ? (
-                                                            <span>{selectedClause.comment}</span>
-                                                        ) : (
-                                                            <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>Add a comment...</span>
-                                                        )}
-                                                    </div>
-                                                )}
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {/* Right: Standard Clause */}
-                                    <div className="comp-pane standard-pane">
-                                        <div className="pane-title">📄 Standard Clause</div>
+                                        <div className="pane-title">📝 Uploaded Contract</div>
                                         <div className="pane-content">
-                                            {selectedClause.matched_clause?.content || "No matching standard clause found via SBERT."}
+                                            <div
+                                                className="text-display"
+                                                dangerouslySetInnerHTML={{ __html: selectedClause.html_diff || selectedClause.content }}
+                                            />
+                                        </div>
+                                    </div>
+
+                                    <div className="comp-pane standard-pane">
+                                        <div className="pane-title">📜 Standard Clause</div>
+                                        <div className="pane-content">
+                                            {selectedClause.matched_clause ? (
+                                                <div className="matched-clause-box">
+                                                    <div className="matched-clause-name">{selectedClause.matched_clause.clause || selectedClause.clause_type}</div>
+                                                    <div className="matched-clause-text">{selectedClause.matched_clause.content}</div>
+                                                </div>
+                                            ) : (
+                                                <div className="no-match-box">No direct match found in standard library.</div>
+                                            )}
                                         </div>
                                     </div>
                                 </div>
 
-                                {/* LLM Differences Box */}
-                                <div className="differences-box">
-                                    <div className="diff-header">
-                                        <span className="diff-title">✨ AI Analysis & Differences</span>
-                                        {!llmAnswer && !llmLoading && (
-                                            <button className="btn-ask-llm-small" onClick={handleAskLLM}>
-                                                Run Analysis
+                                <div className="ai-analysis-section">
+                                    <div className="ai-analysis-box">
+                                        <div className="ai-box-title">🤖 AI Analysis</div>
+                                        <div className="ai-reasoning">
+                                            {llmLoading ? (
+                                                <div className="analysis-loading">
+                                                    <div className="spinner-small" /> Analyzing risks...
+                                                </div>
+                                            ) : (
+                                                llmAnswer || selectedClause.llm_reasoning || "No automated analysis available for this clause."
+                                            )}
+                                        </div>
+                                        {!llmAnswer && (
+                                            <button className="btn-run-analysis" onClick={handleAskLLM}>Run Detailed Analysis</button>
+                                        )}
+                                    </div>
+                                </div>
+
+                                {/* Suggestion Editor (Overlay-ish but inside detail) */}
+                                {isSuggesting && (
+                                    <div className="sug-editor-section">
+                                        <h4>Suggest a Revision</h4>
+                                        <textarea
+                                            className="sug-textarea-v2"
+                                            rows={12}
+                                            value={suggestionDraft}
+                                            onChange={(e) => setSuggestionDraft(e.target.value)}
+                                            placeholder="Type your suggested changes here..."
+                                        />
+                                        <div className="sug-editor-actions">
+                                            <button className="btn-submit-sug blue-pill" onClick={submitSuggestion} disabled={actionLoading}>
+                                                {actionLoading ? <div className="spinner-small" /> : '📬 Submit Suggestion'}
                                             </button>
-                                        )}
+                                            <button className="btn-cancel-sug" onClick={() => setIsSuggesting(false)}>Cancel</button>
+                                        </div>
                                     </div>
-                                    <div className="diff-content">
-                                        {llmLoading ? (
-                                            <div className="spinner-small" />
-                                        ) : llmAnswer ? (
-                                            <p>{llmAnswer}</p>
-                                        ) : selectedClause.llm_reasoning ? (
-                                            <p>{selectedClause.llm_reasoning}</p>
-                                        ) : (
-                                            <span style={{ color: '#94a3b8', fontStyle: 'italic' }}>
-                                                Click "Run Analysis" to generate an on-demand AI assessment of risks and deviations.
-                                            </span>
-                                        )}
+                                )}
+
+                                {/* Suggestions list */}
+                                {(selectedClause.suggestions || []).length > 0 && (
+                                    <div className="suggestions-list-section">
+                                        <div className="suggestions-list-title">💬 Suggestions</div>
+                                        {(selectedClause.suggestions || []).map(sug => (
+                                            <div key={sug.id} className={`suggestion-card status-${sug.status}`}>
+                                                <div className="sug-card-meta">
+                                                    <span className="sug-author">✍️ {sug.author}</span>
+                                                    <span className="sug-timestamp">
+                                                        {sug.timestamp ? new Date(sug.timestamp).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
+                                                    </span>
+                                                    <span className={`sug-status-pill ${sug.status}`}>
+                                                        {sug.status === 'pending' ? '⏳ Pending' : sug.status === 'accepted' ? '✓ Accepted' : '✗ Rejected'}
+                                                    </span>
+                                                </div>
+                                                <div
+                                                    className="sug-diff-preview"
+                                                    dangerouslySetInnerHTML={{
+                                                        __html: buildSuggestionPreviewHtml(sug.original_text, sug.suggested_text, sug.change_type)
+                                                    }}
+                                                />
+                                                {sug.status === 'pending' && (
+                                                    <div className="sug-card-actions">
+                                                        <button className="btn-accept-sug" disabled={sugActionLoading[sug.id]} onClick={() => handleSuggestionAction(sug.id, 'accept')}>
+                                                            {sugActionLoading[sug.id] ? '…' : '✓ Accept'}
+                                                        </button>
+                                                        <button className="btn-reject-sug" disabled={sugActionLoading[sug.id]} onClick={() => handleSuggestionAction(sug.id, 'reject')}>
+                                                            {sugActionLoading[sug.id] ? '…' : '✗ Reject'}
+                                                        </button>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
                                     </div>
+                                )}
+
+                                <div className="clause-comment-section">
+                                    <div className="comment-label">⚖️ Legal Note / Comment</div>
+                                    {isCommenting ? (
+                                        <div className="comment-mode-container">
+                                            <textarea
+                                                className="comment-input"
+                                                value={commentValue}
+                                                onChange={e => setCommentValue(e.target.value)}
+                                                placeholder="Add a legal comment for the client..."
+                                            />
+                                            <div className="edit-actions">
+                                                <button className="btn-save blue-pill" onClick={saveComment}>Save Comment</button>
+                                                <button className="btn-cancel" onClick={() => setIsCommenting(false)}>Cancel</button>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <div className="clause-comment-display" onClick={() => { setCommentValue(selectedClause.comment || ''); setIsCommenting(true); }}>
+                                            {selectedClause.comment ? (
+                                                <p>{selectedClause.comment}</p>
+                                            ) : (
+                                                <span className="placeholder">Click to add a legal note or comment for the client...</span>
+                                            )}
+                                        </div>
+                                    )}
                                 </div>
 
-                                {/* Bottom Action Bar */}
-                                <div className="detail-actions">
-                                    <div className="left-actions">
-                                        <button
-                                            className="btn-action btn-edit"
-                                            onClick={() => {
-                                                setEditValue(selectedClause.edited_content || selectedClause.content);
-                                                setIsEditing(true);
-                                                setIsCommenting(false);
-                                            }}
-                                            disabled={actionLoading}
-                                        >
-                                            ✏️ Edit Clause
+                                <div className="bottom-detail-actions">
+                                    {!isSuggesting && (
+                                        <button className="btn-action suggest-btn blue-pill-large" onClick={startSuggesting}>
+                                            ✏️ Suggest Edit
                                         </button>
-                                    </div>
-                                    <div className="right-actions">
-                                        {/* Reject explicitly removed by User Request */}
-                                    </div>
+                                    )}
                                 </div>
-
                             </div>
                         )}
                     </div>
                 </div>
 
+                {/* Fixed Global Action Bar */}
+                <div className="review-footer-fixed">
+                    <div className="footer-left">
+                        <div className="final-actions-group">
+                            <button className="btn-footer secondary" onClick={handleDownloadRedline}>
+                                📥 Download Redline
+                            </button>
+                            <button className="btn-footer primary" onClick={handleSendRedline} disabled={sendingRedline}>
+                                {sendingRedline ? 'Sending...' : '📨 Send Redline to Client'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <DocumentChatbot documentId={documentId} />
+
+                {redlineMsg && <div className="redline-toast">{redlineMsg}</div>}
             </div>
         </Layout>
     );

@@ -20,6 +20,7 @@ function Dashboard({ user, onLogout }) {
 
     const [clients, setClients] = useState([]);
     const [stats, setStats] = useState({ totalDocs: 0, totalClients: 0, pendingReviews: 0 });
+    const [recentDocs, setRecentDocs] = useState([]);
     const [loading, setLoading] = useState(true);
     const [searchQuery, setSearchQuery] = useState('');
 
@@ -40,6 +41,10 @@ function Dashboard({ user, onLogout }) {
 
             if (clientsRes.ok && docsRes.ok) {
                 const documents = docsData.documents || [];
+                // Sort by last modified/created (using id as proxy if date not available)
+                const sorted = [...documents].sort((a, b) => (b.id > a.id ? 1 : -1)).slice(0, 5);
+                setRecentDocs(sorted);
+
                 let sumTotalDocs = 0;
                 let sumPendingReviews = 0;
 
@@ -133,40 +138,80 @@ function Dashboard({ user, onLogout }) {
                     />
                 </div>
 
-                <div className="section-header" style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
-                    <div style={{ flex: '1', minWidth: '200px' }}>
-                        <h2>All Clients</h2>
-                        <p>Manage and monitor your legal workspaces</p>
+                <div className="dashboard-grid">
+                    <div className="grid-left">
+                        <div className="section-header">
+                            <h2>Recent Uploads</h2>
+                            <p>Overview of the latest document activity</p>
+                        </div>
+                        <div className="recent-uploads-card">
+                            {loading ? (
+                                <div className="loading-shimmer" />
+                            ) : recentDocs.length > 0 ? (
+                                <table className="recent-docs-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Document Name</th>
+                                            <th>Date</th>
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {recentDocs.map(doc => (
+                                            <tr key={doc.id} onClick={() => navigate(`/analyze/${doc.id}`)}>
+                                                <td>
+                                                    <div className="doc-name-cell">
+                                                        <span className="doc-icon">📄</span>
+                                                        <div className="doc-info">
+                                                            <div className="doc-name">{doc.filename}</div>
+                                                            <div className="doc-type">{doc.document_type}</div>
+                                                        </div>
+                                                    </div>
+                                                </td>
+                                                <td>Recently</td>
+                                                <td>
+                                                    <span className={`status-pill ${doc.status}`}>
+                                                        {doc.status.charAt(0).toUpperCase() + doc.status.slice(1)}
+                                                    </span>
+                                                </td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            ) : (
+                                <p className="empty-msg">No recent uploads found.</p>
+                            )}
+                        </div>
                     </div>
 
-                    <div className="search-container" style={{ flex: '1', maxWidth: '400px', position: 'relative' }}>
+                    <div className="grid-right">
+                        <div className="section-header">
+                            <h2>Quick Actions</h2>
+                        </div>
+                        <div className="actions-card">
+                            <button className="dashboard-btn primary" onClick={() => navigate('/invite-client')}>
+                                <span>➕</span> Invite New Client
+                            </button>
+                            <button className="dashboard-btn secondary" onClick={() => navigate('/templates')}>
+                                <span>📋</span> Manage Templates
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div className="section-header" style={{ marginTop: '3rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                        <h2>All Clients</h2>
+                        <p>Manage and monitor legal workspaces</p>
+                    </div>
+                    <div className="search-pill">
                         <input
                             type="text"
                             placeholder="Search clients..."
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            style={{
-                                width: '100%',
-                                padding: '0.75rem 1rem 0.75rem 2.5rem',
-                                borderRadius: '8px',
-                                border: '1px solid #e2e8f0',
-                                outline: 'none',
-                                transition: 'all 0.2s',
-                                fontSize: '0.95rem'
-                            }}
-                            className="search-input"
                         />
-                        <svg
-                            style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: '#64748b' }}
-                            width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24"
-                        >
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                        </svg>
                     </div>
-
-                    <button className="btn btn-primary" style={{ width: 'auto', padding: '0.75rem 1.5rem', borderRadius: '8px', boxShadow: '0 4px 12px rgba(37,99,235,0.2)' }} onClick={() => navigate('/invite-client')}>
-                        Create New Client
-                    </button>
                 </div>
 
                 <div style={{ marginTop: '1rem' }}>

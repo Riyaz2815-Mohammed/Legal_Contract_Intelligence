@@ -133,13 +133,22 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, o
                                 <td>
                                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
                                         {isAdmin && (doc.status === 'pending' || doc.status === 'uploaded') && (
-                                            <button
-                                                className="btn-action btn-reject"
-                                                onClick={() => onReject && onReject(doc.id)}
-                                                title="Reject Document"
-                                            >
-                                                ❌
-                                            </button>
+                                            <>
+                                                <button
+                                                    className="btn-action btn-approve-full"
+                                                    onClick={() => onApprove && onApprove(doc.id)}
+                                                    title="Accept Document"
+                                                >
+                                                    ✔️
+                                                </button>
+                                                <button
+                                                    className="btn-action btn-reject"
+                                                    onClick={() => onReject && onReject(doc.id)}
+                                                    title="Reject Document"
+                                                >
+                                                    ❌
+                                                </button>
+                                            </>
                                         )}
                                         <button
                                             className="btn-action btn-download"

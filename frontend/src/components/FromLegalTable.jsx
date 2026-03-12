@@ -127,25 +127,23 @@ function FromLegalTable({ contracts, loading, onAccept, onReject }) {
                                         onClick={() => handleDownload(contract.id)}
                                         title="Download Contract"
                                     >
-                                        ⬇ Download
+                                        ⬇
                                     </button>
                                     {(contract.status === 'pending_review' || contract.status === 'pending_mandate' || contract.document_type === 'Redlined') && (
                                         <>
                                             <button
                                                 className="btn-action btn-approve"
                                                 onClick={() => onAccept && onAccept(contract.id, contract.is_mandate)}
-                                                style={{ backgroundColor: '#10b981', color: 'white' }}
-                                                title="Accept Contract"
+                                                title="Accept Document"
                                             >
-                                                ✅ Accept
+                                                ✔️
                                             </button>
                                             <button
                                                 className="btn-action btn-reject"
                                                 onClick={() => onReject && onReject(contract.id, contract.is_mandate)}
-                                                style={{ backgroundColor: '#ef4444', color: 'white' }}
-                                                title="Reject Contract"
+                                                title="Reject Document"
                                             >
-                                                ❌ Reject
+                                                ❌
                                             </button>
                                         </>
                                     )}
