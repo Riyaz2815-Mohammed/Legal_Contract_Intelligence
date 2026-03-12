@@ -75,9 +75,35 @@
     border-color: #10b981;
 }
 
+.btn-reject {
+    background-color: #f87171;
+    /* Lightened red */
+    color: white;
+    border-color: #f87171;
+}
+
 .btn-reject:hover {
-    background: rgba(239, 68, 68, 0.1);
+    background-color: #ef4444;
     border-color: #ef4444;
+}
+
+.btn-approve-full {
+    background-color: #86efac;
+    color: #15803d;
+    border-color: #86efac;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    padding: 0.4rem 0.8rem;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    white-space: nowrap;
+}
+
+.btn-approve-full:hover {
+    background-color: #059669;
+    border-color: #059669;
+    color: white;
 }
 
 .btn-download:hover {

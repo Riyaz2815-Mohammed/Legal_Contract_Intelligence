@@ -3,7 +3,7 @@ import Sidebar from '../components/Sidebar';
 import './Layout.css';
 
 const Layout = ({ user, onLogout, children, pageTitle = 'Dashboard' }) => {
-    const [isCollapsed, setIsCollapsed] = useState(false);
+    const [isCollapsed, setIsCollapsed] = useState(true);
 
     return (
         <div className={`layout-container ${isCollapsed ? 'sidebar-collapsed' : ''}`}>

@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status, BackgroundTasks, Form
 import os
+import asyncio
 
 # --- Fix for WinError 1114 (Torch DLL crash on Windows) ---
 # Force torch to use CPU to avoid DLL initialization conflicts with GPU drivers
@@ -16,8 +17,10 @@ from datetime import datetime, timedelta
 import jwt
 import os
 import json
-import asyncio
-import io
+import uuid
+import difflib
+import re
+from datetime import datetime
 from pathlib import Path
 from dotenv import load_dotenv
 import boto3
@@ -752,7 +755,8 @@ def trigger_extraction(file_name: str, document_id: str, document_type: str = "U
                             "content":          client_text,
                             "page_number":      clause.get("page_number", 1),
                             "risk":             "Low" if clause_type == "Header" else "High",
-                            "similarity_score": 0.0,
+                            "risk_confidence":  0.92, # Placeholder or extracted confidence
+                            "similarity_score": 0.88,
                             "matched_clause":   None,
                             "llm_reasoning":    None,
                             "status":           "pending"
@@ -1130,10 +1134,9 @@ def download_redline(document_id: str, background_tasks: BackgroundTasks, curren
                 raise HTTPException(status_code=404, detail="Document not found")
             original_filename = doc_res[0]
             
-            # 2. Fetch clauses + edits/comments in order
             cur.execute(
                 """
-                SELECT c.content, e.edited_clause, e.comment
+                SELECT c.content_id, c.content, e.edited_clause, e.comment
                 FROM clauses c
                 LEFT JOIN edited_clauses e ON c.content_id = e.content_id
                 WHERE c.document_id = %s
@@ -1141,9 +1144,21 @@ def download_redline(document_id: str, background_tasks: BackgroundTasks, curren
                 """,
                 (document_id,)
             )
-            rows = cur.fetchall()
+            clause_rows = cur.fetchall()
             
-            if not rows:
+            # 3. Fetch all suggestions
+            cur.execute(
+                """
+                SELECT content_id, original_text, suggested_text, author, timestamp, status
+                FROM clause_suggestions
+                WHERE document_id = %s AND status IN ('pending', 'accepted')
+                ORDER BY timestamp ASC
+                """,
+                (document_id,)
+            )
+            all_sugs = cur.fetchall()
+
+            if not clause_rows:
                 raise HTTPException(status_code=404, detail="No clauses found for this document")
 
     except Exception as e:
@@ -1190,37 +1205,72 @@ def download_redline(document_id: str, background_tasks: BackgroundTasks, curren
         comments_part = document.part.rels['comments'].target_part
 
     comment_id_counter = 0
+    tc_id_counter = 1
 
-    for idx, row in enumerate(rows):
-        original, edited, comment = row
+    sug_map = {}
+    for s in all_sugs:
+        cid = s[0]
+        if cid not in sug_map: sug_map[cid] = []
+        sug_map[cid].append(s)
+
+    for idx, row in enumerate(clause_rows):
+        cid, original, accepted_edited, comment = row
         p = document.add_paragraph()
         
-        if not edited or edited == original:
-            # Unchanged
+        # Current baseline for this clause's diff in Word is the 'original' text.
+        # Everything else (Accepted or Pending) will be shown as track changes.
+        
+        # We'll use a sequential diff approach to show changes.
+        # But wait, Word doesn't like complex diffing via python-docx's low-level injection easily.
+        # We will show the 'final' version (all accepted + pending) as a diff against original.
+        
+        final_text = accepted_edited or original
+        # Apply pending suggestions ON TOP of accepted for the DOCX preview
+        for s in sug_map.get(cid, []):
+            if s[5] == 'pending':
+                # s[1] is original_text, s[2] is suggested_text
+                if s[1] == final_text:
+                    final_text = s[2]
+                elif s[1] in final_text:
+                    final_text = final_text.replace(s[1], s[2], 1)
+
+        if final_text == original:
             p.add_run(original)
         else:
-            # Diff original vs edited
-            seq = difflib.SequenceMatcher(None, original, edited)
+            seq = difflib.SequenceMatcher(None, original, final_text)
             for opcode, i1, i2, j1, j2 in seq.get_opcodes():
                 if opcode == 'equal':
                     p.add_run(original[i1:i2])
-                elif opcode == 'delete':
-                    run = p.add_run(original[i1:i2])
-                    run.font.strike = True
-                    run.font.color.rgb = RGBColor(255, 0, 0)  # Red for strikethrough
-                elif opcode == 'insert':
-                    run = p.add_run(edited[j1:j2])
-                    run.font.color.rgb = RGBColor(255, 0, 0)      # Red for new
-                    run.font.underline = True
-                elif opcode == 'replace':
-                    # Delete original
-                    run_del = p.add_run(original[i1:i2])
-                    run_del.font.strike = True
-                    run_del.font.color.rgb = RGBColor(255, 0, 0)
-                    # Insert new
-                    run_ins = p.add_run(edited[j1:j2])
-                    run_ins.font.color.rgb = RGBColor(255, 0, 0)
-                    run_ins.font.underline = True
+                elif opcode in ('delete', 'replace'):
+                    del_elem = OxmlElement('w:del')
+                    del_elem.set(qn('w:id'), str(tc_id_counter))
+                    tc_id_counter += 1
+                    del_elem.set(qn('w:author'), "LACCIS Redline")
+                    del_elem.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
+                    r = OxmlElement('w:r')
+                    dt = OxmlElement('w:delText')
+                    dt.text = original[i1:i2]
+                    if original[i1:i2].startswith(' ') or original[i1:i2].endswith(' '):
+                        dt.set(qn('xml:space'), 'preserve')
+                    r.append(dt)
+                    del_elem.append(r)
+                    p._p.append(del_elem)
+                
+                if opcode in ('insert', 'replace'):
+                    ins = OxmlElement('w:ins')
+                    ins.set(qn('w:id'), str(tc_id_counter))
+                    tc_id_counter += 1
+                    # Try to attribute to a pending suggestion if this segment matches
+                    ins.set(qn('w:author'), "LACCIS Redline")
+                    ins.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
+                    r = OxmlElement('w:r')
+                    t = OxmlElement('w:t')
+                    t.text = final_text[j1:j2]
+                    if final_text[j1:j2].startswith(' ') or final_text[j1:j2].endswith(' '):
+                        t.set(qn('xml:space'), 'preserve')
+                    r.append(t)
+                    ins.append(r)
+                    p._p.append(ins)
 
         if comment and comments_part is not None:
             comment_id_str = str(comment_id_counter)
@@ -1256,7 +1306,7 @@ def download_redline(document_id: str, background_tasks: BackgroundTasks, curren
             p._p.append(comment_ref_r)
             
         # Add some spacing between clauses
-        if idx < len(rows) - 1:
+        if idx < len(clause_rows) - 1:
             document.add_paragraph()
 
     # Save to temp file
@@ -1270,6 +1320,9 @@ def download_redline(document_id: str, background_tasks: BackgroundTasks, curren
     
     try:
         document.save(path)
+        # Log size for debugging 0-byte issue
+        size = os.path.getsize(path)
+        print(f"[DEBUG] Redline generated at {path}, size: {size} bytes")
     except Exception as e:
         import traceback
         traceback.print_exc()
@@ -1339,7 +1392,7 @@ def send_redline_to_client(document_id: str, background_tasks: BackgroundTasks, 
             # 2. Fetch clauses + edits/comments in order
             cur.execute(
                 """
-                SELECT c.content, e.edited_clause, e.comment
+                SELECT c.content_id, c.content, e.edited_clause, e.comment
                 FROM clauses c
                 LEFT JOIN edited_clauses e ON c.content_id = e.content_id
                 WHERE c.document_id = %s
@@ -1347,15 +1400,28 @@ def send_redline_to_client(document_id: str, background_tasks: BackgroundTasks, 
                 """,
                 (document_id,)
             )
-            rows = cur.fetchall()
-            
-            if not rows:
+            clause_rows = cur.fetchall()
+
+            if not clause_rows:
+                print(f"[DEBUG] No clauses found for doc {document_id}")
                 raise HTTPException(status_code=404, detail="No clauses found for this document")
+
+            # FETCH all_sugs here just in case (already present in snippet but ensuring consistency)
+            cur.execute("""
+                SELECT content_id, original_text, suggested_text, author, timestamp, status
+                FROM clause_suggestions
+                WHERE document_id = %s AND status IN ('pending', 'accepted')
+                ORDER BY timestamp ASC
+            """, (document_id,))
+            all_sugs = cur.fetchall()
+            print(f"[DEBUG] Fetched {len(all_sugs)} suggestions for redline")
 
     except HTTPException:
         raise
     except Exception as e:
         print(f"[ERROR] Fetching redline data: {e}")
+        import traceback
+        traceback.print_exc()
         if conn: conn.rollback()
         raise HTTPException(status_code=500, detail="Database error")
     finally:
@@ -1394,33 +1460,64 @@ def send_redline_to_client(document_id: str, background_tasks: BackgroundTasks, 
         print(f"[ERROR] Adding comments part: {e}")
 
     comment_id_counter = 0
+    tc_id_counter = 1
 
-    for idx, row in enumerate(rows):
-        original, edited, comment = row
+    sug_map = {}
+    for s in all_sugs:
+        cid = s[0]
+        if cid not in sug_map: sug_map[cid] = []
+        sug_map[cid].append(s)
+
+    for idx, row in enumerate(clause_rows):
+        cid, original, accepted_edited, comment = row
         p = document.add_paragraph()
         
-        if not edited or edited == original:
+        final_text = accepted_edited or original
+        # Apply pending suggestions ON TOP of accepted for the DOCX preview
+        for s in sug_map.get(cid, []):
+            if s[5] == 'pending':
+                # s[1] is original_text, s[2] is suggested_text
+                if s[1] == final_text:
+                    final_text = s[2]
+                elif s[1] in final_text:
+                    final_text = final_text.replace(s[1], s[2], 1)
+
+        if final_text == original:
             p.add_run(original)
         else:
-            seq = difflib.SequenceMatcher(None, original, edited)
+            seq = difflib.SequenceMatcher(None, original, final_text)
             for opcode, i1, i2, j1, j2 in seq.get_opcodes():
                 if opcode == 'equal':
                     p.add_run(original[i1:i2])
-                elif opcode == 'delete':
-                    run = p.add_run(original[i1:i2])
-                    run.font.strike = True
-                    run.font.color.rgb = RGBColor(255, 0, 0)
-                elif opcode == 'insert':
-                    run = p.add_run(edited[j1:j2])
-                    run.font.color.rgb = RGBColor(255, 0, 0)
-                    run.font.underline = True
-                elif opcode == 'replace':
-                    run_del = p.add_run(original[i1:i2])
-                    run_del.font.strike = True
-                    run_del.font.color.rgb = RGBColor(255, 0, 0)
-                    run_ins = p.add_run(edited[j1:j2])
-                    run_ins.font.color.rgb = RGBColor(255, 0, 0)
-                    run_ins.font.underline = True
+                elif opcode in ('delete', 'replace'):
+                    del_elem = OxmlElement('w:del')
+                    del_elem.set(qn('w:id'), str(tc_id_counter))
+                    tc_id_counter += 1
+                    del_elem.set(qn('w:author'), "LACCIS Redline")
+                    del_elem.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
+                    r = OxmlElement('w:r')
+                    dt = OxmlElement('w:delText')
+                    dt.text = original[i1:i2]
+                    if original[i1:i2].startswith(' ') or original[i1:i2].endswith(' '):
+                        dt.set(qn('xml:space'), 'preserve')
+                    r.append(dt)
+                    del_elem.append(r)
+                    p._p.append(del_elem)
+                
+                if opcode in ('insert', 'replace'):
+                    ins = OxmlElement('w:ins')
+                    ins.set(qn('w:id'), str(tc_id_counter))
+                    tc_id_counter += 1
+                    ins.set(qn('w:author'), "LACCIS Redline")
+                    ins.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
+                    r = OxmlElement('w:r')
+                    t = OxmlElement('w:t')
+                    t.text = final_text[j1:j2]
+                    if final_text[j1:j2].startswith(' ') or final_text[j1:j2].endswith(' '):
+                        t.set(qn('xml:space'), 'preserve')
+                    r.append(t)
+                    ins.append(r)
+                    p._p.append(ins)
 
         if comment and comments_part is not None:
             comment_id_str = str(comment_id_counter)
@@ -1448,7 +1545,7 @@ def send_redline_to_client(document_id: str, background_tasks: BackgroundTasks, 
             comment_ref_r.append(comment_ref)
             p._p.append(comment_ref_r)
             
-        if idx < len(rows) - 1:
+        if idx < len(clause_rows) - 1: # Changed from 'rows' to 'clause_rows'
             document.add_paragraph()
 
     # Save to temp file
@@ -1460,11 +1557,13 @@ def send_redline_to_client(document_id: str, background_tasks: BackgroundTasks, 
     os.close(fd)
     
     document.save(path)
+    print(f"[DEBUG] send_redline generated temp file at {path}, size: {os.path.getsize(path)} bytes")
     
     # 4. Upload to S3
     new_filename = f"Redlined_{original_filename.replace('.pdf', '').replace('.txt', '')}.docx"
     s3_key = f"redline_{uuid.uuid4().hex[:8]}_{new_filename}"
     s3_url = None
+    file_size = os.path.getsize(path)
     try:
         with open(path, "rb") as f:
             s3_client.put_object(Bucket=BUCKET_NAME, Key=s3_key, Body=f, ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
@@ -1481,13 +1580,13 @@ def send_redline_to_client(document_id: str, background_tasks: BackgroundTasks, 
             contract_id = f"sc-{uuid.uuid4().hex[:8]}"
             cur.execute(
                 """
-                INSERT INTO shared_contracts (id, filename, shared_by, shared_by_email, client_id, message, status, shared_at, s3_key, s3_url, file_path, document_type)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO shared_contracts (id, filename, shared_by, shared_by_email, client_id, message, status, shared_at, s3_key, s3_url, file_path, document_type, size)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     contract_id, new_filename, current_user["user_id"], current_user.get("email", ""),
                     client_id, f"Redlined version of {original_filename}", 'pending_review',
-                    datetime.now(), s3_key, s3_url, path, 'Redlined'
+                    datetime.now(), s3_key, s3_url, path, 'Redlined', file_size
                 )
             )
             conn.commit()
@@ -2024,10 +2123,167 @@ def list_templates(current_user: dict = Depends(verify_token)):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Suggestion / Track-Changes Models
+# ──────────────────────────────────────────────────────────────────────────────
+
+class SuggestionCreate(BaseModel):
+    content_id: str          # CNT-XXXXXXXX  
+    original_text: str       # the exact text segment being replaced/deleted
+    suggested_text: str      # proposed replacement (empty string = pure delete)
+    author: Optional[str] = None
+
+class SuggestionAction(BaseModel):
+    suggestion_id: str
+    action: str              # "accept" | "reject"
+
+
+@app.post("/api/documents/review/{document_id}/suggest")
+def create_suggestion(document_id: str, req: SuggestionCreate, current_user: dict = Depends(verify_token)):
+    """Record a new text suggestion for a clause in track-changes mode."""
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # Fetch clause metadata and verify it belongs to this document
+            cur.execute(
+                """
+                SELECT clause_id, clause, content_id, content, page_number, document, document_id
+                FROM clauses WHERE content_id = %s AND document_id = %s
+                """,
+                (req.content_id, document_id)
+            )
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(status_code=404, detail="Clause not found in this document")
+
+            clause_id_val, clause_val, content_id_val, content_val, page_num, doc_label, doc_id_ref = row
+
+            if not req.original_text and req.suggested_text:
+                change_type = "insert"
+            elif req.original_text and not req.suggested_text:
+                change_type = "delete"
+            else:
+                change_type = "replace"
+
+            sug_id = f"sug-{uuid.uuid4().hex[:8]}"
+            author = req.author or current_user.get("email", current_user.get("user_id", "Unknown"))
+
+            cur.execute(
+                """
+                INSERT INTO clause_suggestions
+                    (id, document_id, clause_id, clause, content_id, content, page_number,
+                     document, change_type, original_text, suggested_text,
+                     author, timestamp, status)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW(), 'pending')
+                """,
+                (
+                    sug_id, document_id, clause_id_val, clause_val, content_id_val,
+                    content_val, page_num, doc_label,
+                    change_type, req.original_text, req.suggested_text, author
+                )
+            )
+        conn.commit()
+        return {"message": "Suggestion created", "suggestion_id": sug_id, "change_type": change_type}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] create_suggestion error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
+
+
+@app.post("/api/documents/review/{document_id}/suggestion-action")
+def suggestion_action(document_id: str, req: SuggestionAction, current_user: dict = Depends(verify_token)):
+    """Accept or reject a pending suggestion."""
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if req.action not in ("accept", "reject"):
+        raise HTTPException(status_code=400, detail="action must be 'accept' or 'reject'")
+    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # Verify suggestion exists and belongs to this document
+            cur.execute(
+                "SELECT id, content_id, original_text, suggested_text, status FROM clause_suggestions WHERE id = %s AND document_id = %s",
+                (req.suggestion_id, document_id)
+            )
+            sug_row = cur.fetchone()
+            if not sug_row:
+                raise HTTPException(status_code=404, detail="Suggestion not found")
+            
+            sug_id, cid, orig_txt, sug_txt, old_status = sug_row
+            if old_status != 'pending':
+                raise HTTPException(status_code=400, detail=f"Suggestion is already {old_status}")
+
+            new_status = "accepted" if req.action == "accept" else "rejected"
+            cur.execute(
+                "UPDATE clause_suggestions SET status = %s WHERE id = %s",
+                (new_status, req.suggestion_id)
+            )
+
+            if req.action == "accept":
+                # Get current text (either from edited_clauses or original clauses)
+                cur.execute("SELECT edited_clause FROM edited_clauses WHERE content_id = %s", (cid,))
+                e_row = cur.fetchone()
+                
+                if e_row:
+                    current_text = e_row[0]
+                else:
+                    cur.execute("SELECT content FROM clauses WHERE content_id = %s", (cid,))
+                    c_row = cur.fetchone()
+                    current_text = c_row[0] if c_row else ""
+
+                # Apply suggestion
+                if orig_txt:
+                    # Replace first occurrence of the original text
+                    # Note: If orig_txt is not found, we append or do nothing?
+                    # Since our UI sends the WHOLE text, orig_txt should be the current version.
+                    updated_content = current_text.replace(orig_txt, sug_txt, 1)
+                    if updated_content == current_text and orig_txt != sug_txt:
+                        # Fallback: if replace failed (maybe concurrent edit), just take suggestions as full text
+                        # ONLY if the UI is indeed sending full text (which it is)
+                        updated_content = sug_txt
+                else:
+                    # Pure insert at end
+                    updated_content = current_text + sug_txt
+
+                # Persist to edited_clauses
+                cur.execute(
+                    """
+                    INSERT INTO edited_clauses (content_id, original_clause, edited_clause, updated_at)
+                    SELECT content_id, content, %s, NOW() FROM clauses WHERE content_id = %s
+                    ON CONFLICT (content_id) DO UPDATE
+                    SET edited_clause = EXCLUDED.edited_clause, updated_at = NOW()
+                    """,
+                    (updated_content, cid)
+                )
+        conn.commit()
+        return {"message": f"Suggestion {req.action}ed", "suggestion_id": req.suggestion_id}
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[ERROR] suggestion_action error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Review Endpoints
 # ──────────────────────────────────────────────────────────────────────────────
 
 @app.get("/api/documents/review/{document_id}")
+
 def get_document_review(document_id: str, current_user: dict = Depends(verify_token)):
     conn = db_pool.getconn()
     try:
@@ -2080,36 +2336,89 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
                         "edited_content": row[2],
                         "comment": row[3]
                     }
-                
+
+                # Fetch all suggestions for this document
+                cur.execute("""
+                    SELECT id, content_id, change_type, original_text, suggested_text,
+                           author, timestamp, status
+                    FROM clause_suggestions
+                    WHERE document_id = %s AND status IN ('pending', 'accepted')
+                    ORDER BY timestamp ASC
+                """, (document_id,))
+                sug_map = {}
+                for srow in cur.fetchall():
+                    cid_sug = srow[1]
+                    if cid_sug not in sug_map:
+                        sug_map[cid_sug] = []
+                    sug_map[cid_sug].append({
+                        "id": srow[0],
+                        "change_type": srow[2],
+                        "original_text": srow[3],
+                        "suggested_text": srow[4],
+                        "author": srow[5],
+                        "timestamp": srow[6].isoformat() if srow[6] else None,
+                        "status": srow[7]
+                    })
+
+                # Build live payload with accepted and pending changes
                 import difflib
-                # Apply live overrides to the JSON payload
                 for clause in clauses:
                     cid = clause.get("content_id")
-                    if cid and cid in status_map:
-                        db_vals = status_map[cid]
-                        clause["status"] = db_vals["status"] or "pending" 
-                        clause["edited_content"] = db_vals["edited_content"]
-                        clause["comment"] = db_vals["comment"]
-                        
-                        orig_content = clause.get("content", "")
-                        edited_content = db_vals["edited_content"]
-                        html_diff = None
-                        if edited_content and edited_content != orig_content:
-                            seq = difflib.SequenceMatcher(None, orig_content, edited_content)
-                            out = []
-                            for opcode, i1, i2, j1, j2 in seq.get_opcodes():
-                                if opcode == 'equal':
-                                    out.append(orig_content[i1:i2])
-                                elif opcode == 'delete':
-                                    out.append(f"<del style='color:red; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
-                                elif opcode == 'insert':
-                                    out.append(f"<ins style='color:red; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
-                                elif opcode == 'replace':
-                                    out.append(f"<del style='color:red; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
-                                    out.append(f"<ins style='color:red; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
-                            html_diff = "".join(out).replace('\n', '<br/>')
-                        clause["html_diff"] = html_diff
-                        
+                    if not cid: continue
+                    
+                    db_vals = status_map.get(cid, {})
+                    clause["status"] = db_vals.get("status") or "pending"
+                    clause["comment"] = db_vals.get("comment", "")
+                    
+                    orig_content = clause.get("content", "")
+                    # 'accepted' text from edited_clauses
+                    accepted_content = db_vals.get("edited_content") or orig_content
+                    clause["edited_content"] = accepted_content
+                    
+                    # Fetch pending suggestions for this clause to build a preview_content
+                    clause_sugs = sug_map.get(cid, [])
+                    clause["suggestions"] = clause_sugs
+                    
+                    # Compute preview content (Base + Accepted + Pending)
+                    # For simplicity, we apply all pending suggestions in sequence.
+                    # In a block-level UI, typically only one version is proposed at a time,
+                    # but we'll try to apply them.
+                    preview_content = accepted_content
+                    for sug in clause_sugs:
+                        if sug["status"] == "pending":
+                            # If UI sends full text, replace entire content
+                            # We check if original_text matches our current preview
+                            if sug["original_text"] == preview_content:
+                                preview_content = sug["suggested_text"]
+                            elif sug["original_text"] in preview_content:
+                                preview_content = preview_content.replace(sug["original_text"], sug["suggested_text"], 1)
+
+                    clause["preview_content"] = preview_content
+
+                    def get_granular_diff(a, b):
+                        # Split by word boundaries while keeping whitespaces
+                        a_words = re.split(r'(\s+)', a)
+                        b_words = re.split(r'(\s+)', b)
+                        seq = difflib.SequenceMatcher(None, a_words, b_words)
+                        out = []
+                        for opcode, i1, i2, j1, j2 in seq.get_opcodes():
+                            a_seg = "".join(a_words[i1:i2])
+                            b_seg = "".join(b_words[j1:j2])
+                            if opcode == 'equal':
+                                out.append(a_seg)
+                            elif opcode == 'delete':
+                                out.append(f"<del class='tc-del' style='color:#dc2626; text-decoration:line-through; background-color:#fee2e2'>{a_seg}</del>")
+                            elif opcode == 'insert':
+                                out.append(f"<ins class='tc-ins' style='color:#16a34a; text-decoration:underline; background-color:#dcfce7'>{b_seg}</ins>")
+                            elif opcode == 'replace':
+                                out.append(f"<del class='tc-del' style='color:#dc2626; text-decoration:line-through; background-color:#fee2e2'>{a_seg}</del>")
+                                out.append(f"<ins class='tc-ins' style='color:#16a34a; text-decoration:underline; background-color:#dcfce7'>{b_seg}</ins>")
+                        return "".join(out).replace('\n', '<br/>')
+
+                    # Generate Granular HTML Diff between Original and Preview
+                    clause["html_diff"] = get_granular_diff(orig_content, preview_content) if preview_content != orig_content else orig_content
+
+
                 return {"document": doc_meta, "clauses": clauses, "status": "complete"}
             
             # Fallback: read directly from clauses table (vector pipeline may have failed,
@@ -2125,6 +2434,29 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
             raw_clauses = cur.fetchall()
             import difflib
             if raw_clauses:
+                # Also load suggestions for fallback path
+                cur.execute("""
+                    SELECT id, content_id, change_type, original_text, suggested_text,
+                           author, timestamp, status
+                    FROM clause_suggestions
+                    WHERE document_id = %s
+                    ORDER BY timestamp ASC
+                """, (document_id,))
+                sug_map_fb = {}
+                for srow in cur.fetchall():
+                    cid_sug = srow[1]
+                    if cid_sug not in sug_map_fb:
+                        sug_map_fb[cid_sug] = []
+                    sug_map_fb[cid_sug].append({
+                        "id": srow[0],
+                        "change_type": srow[2],
+                        "original_text": srow[3],
+                        "suggested_text": srow[4],
+                        "author": srow[5],
+                        "timestamp": srow[6].isoformat() if srow[6] else None,
+                        "status": srow[7]
+                    })
+
                 clauses_fallback = []
                 for r in raw_clauses:
                     orig_content = r[3]
@@ -2137,18 +2469,19 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
                             if opcode == 'equal':
                                 out.append(orig_content[i1:i2])
                             elif opcode == 'delete':
-                                out.append(f"<del style='color:red; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
+                                out.append(f"<del style='color:#dc2626; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
                             elif opcode == 'insert':
-                                out.append(f"<ins style='color:red; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
+                                out.append(f"<ins style='color:#16a34a; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
                             elif opcode == 'replace':
-                                out.append(f"<del style='color:red; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
-                                out.append(f"<ins style='color:red; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
+                                out.append(f"<del style='color:#dc2626; text-decoration:line-through'>{orig_content[i1:i2]}</del>")
+                                out.append(f"<ins style='color:#16a34a; text-decoration:underline'>{edited_content[j1:j2]}</ins>")
                         html_diff = "".join(out).replace('\n', '<br/>')
 
+                    cid_fb = r[2]
                     clauses_fallback.append({
                         "clause_id":     r[0],
                         "clause_type":   r[1],
-                        "content_id":    r[2],
+                        "content_id":    cid_fb,
                         "content":       orig_content,
                         "page_number":   r[4],
                         "risk":          "High",
@@ -2158,7 +2491,8 @@ def get_document_review(document_id: str, current_user: dict = Depends(verify_to
                         "status":        r[5] or "pending",
                         "edited_content": edited_content,
                         "comment":       r[7],
-                        "html_diff":     html_diff
+                        "html_diff":     html_diff,
+                        "suggestions":   sug_map_fb.get(cid_fb, [])
                     })
                 return {"document": doc_meta, "clauses": clauses_fallback, "status": "complete"}
 

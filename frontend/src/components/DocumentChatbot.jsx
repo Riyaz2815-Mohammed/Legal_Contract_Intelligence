@@ -65,7 +65,7 @@ export default function DocumentChatbot({ documentId }) {
         <div className={`doc-chatbot-container ${isOpen ? 'open' : 'closed'}`}>
             {!isOpen ? (
                 <button className="chatbot-toggle-btn" onClick={() => setIsOpen(true)}>
-                    💬 Ask AI Assistant
+                    🤖 Ask AI Assistant
                 </button>
             ) : (
                 <div className="chatbot-window">

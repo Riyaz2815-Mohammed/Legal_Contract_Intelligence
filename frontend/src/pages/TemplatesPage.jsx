@@ -11,7 +11,7 @@ const TemplatesPage = ({ user, onLogout }) => {
 
     const templateTypes = [
         { id: 'NDA', name: 'Non-Disclosure Agreement (NDA)', description: 'Confidentiality agreement for preliminary discussions.' },
-        { id: 'RA', name: 'Referee Agreement (RA)', description: 'Standard agreement for referee services.' },
+        { id: 'RA', name: 'Referral Agreement (RA)', description: 'Standard agreement for referral services.' },
         { id: 'SOW', name: 'Statement of Work (SOW)', description: 'Detailed project scope and deliverables document.' },
         { id: 'MSA', name: 'Master Service Agreement (MSA)', description: 'Overarching terms for ongoing services.' }
     ];
