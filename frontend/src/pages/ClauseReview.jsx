@@ -306,32 +306,23 @@ export default function ClauseReview({ user, onLogout }) {
         setActionLoading(true);
         try {
             const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/download-redline/${documentId}`, {
-                headers: { 'Authorization': `Bearer ${token}` },
+            const res = await fetch(`${API_URL}/api/documents/download-redline-docs/${documentId}`, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) {
                 const text = await res.text();
-                throw new Error(text || 'Download failed');
+                throw new Error(text || 'Failed to open Google Docs');
             }
-            const blob = await res.blob();
-            const contentDisposition = res.headers.get('Content-Disposition');
-            let filename = `Redlined_Document.docx`;
-            if (contentDisposition) {
-                const filenameMatch = contentDisposition.match(/filename="?([^"]+)"?/);
-                if (filenameMatch && filenameMatch.length === 2) filename = filenameMatch[1];
+            const data = await res.json();
+            if (data.url) {
+                window.open(data.url, '_blank');
+            } else {
+                throw new Error('No URL returned');
             }
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.style.display = 'none';
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
         } catch (err) {
             console.error('Download redline error', err);
-            alert(`Failed to download redline document: ${err.message}`);
+            alert(`Failed to open Redline in Google Docs: ${err.message}`);
         } finally {
             setActionLoading(false);
         }
@@ -591,10 +582,10 @@ export default function ClauseReview({ user, onLogout }) {
                 <div className="review-footer-fixed">
                     <div className="footer-left">
                         <div className="final-actions-group">
-                            <button className="btn-footer secondary" onClick={handleDownloadRedline}>
-                                📥 Download Redline
+                            <button className="btn-footer secondary" onClick={handleDownloadRedline} disabled={actionLoading}>
+                                {actionLoading ? <span className="spinner-small" style={{ margin: '0 8px' }}/> : '📥 Download Redline'}
                             </button>
-                            <button className="btn-footer primary" onClick={handleSendRedline} disabled={sendingRedline}>
+                            <button className="btn-footer primary" onClick={handleSendRedline} disabled={sendingRedline || actionLoading}>
                                 {sendingRedline ? 'Sending...' : '📨 Send Redline to Client'}
                             </button>
                         </div>

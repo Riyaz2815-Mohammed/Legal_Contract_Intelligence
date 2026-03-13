@@ -47,6 +47,7 @@ CREATE TABLE documents (
     file_path       TEXT,
     s3_url          TEXT,
     s3_key          TEXT,
+    google_doc_id   TEXT,
     -- Template extra fields (null for non-templates)
     template_type   TEXT,                              -- 'NDA' | 'RA' | 'MSA' | 'SOW'
     -- Approval / rejection audit trail

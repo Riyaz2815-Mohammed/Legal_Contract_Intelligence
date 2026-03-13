@@ -1338,6 +1338,520 @@ def download_redline(document_id: str, background_tasks: BackgroundTasks, curren
         background=background_tasks.add_task(os.remove, path)
     )
 
+@app.post("/api/documents/download-redline-docs/{document_id}")
+def download_redline_docs(document_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(verify_token)):
+    import os
+    import traceback
+    
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # 1. Check if google_doc_id already exists
+            cur.execute("SELECT filename, google_doc_id, document_type, s3_key, file_path FROM documents WHERE id = %s", (document_id,))
+            doc_res = cur.fetchone()
+            if not doc_res:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            original_filename = doc_res[0]
+            existing_doc_id = doc_res[1]
+            document_type = doc_res[2]
+            s3_key = doc_res[3]
+            file_path = doc_res[4]
+            
+            # If we've already generated/uploaded a doc for this redline directly, return it
+            if existing_doc_id:
+                return {"url": f"https://docs.google.com/document/d/{existing_doc_id}/edit"}
+            
+            # It's a review page, we need to generate the redline .docx locally and upload it
+            
+            # Fetch data to generate redline
+            cur.execute(
+                """
+                SELECT c.content_id, c.content, e.edited_clause, e.comment
+                FROM clauses c
+                LEFT JOIN edited_clauses e ON c.content_id = e.content_id
+                WHERE c.document_id = %s
+                ORDER BY c.page_number ASC, c.ctid ASC
+                """,
+                (document_id,)
+            )
+            clause_rows = cur.fetchall()
+            
+            cur.execute(
+                """
+                SELECT content_id, original_text, suggested_text, author, timestamp, status
+                FROM clause_suggestions
+                WHERE document_id = %s AND status IN ('pending', 'accepted')
+                ORDER BY timestamp ASC
+                """,
+                (document_id,)
+            )
+            all_sugs = cur.fetchall()
+
+            if not clause_rows:
+                # If there are no clauses, we must look for the original file and upload IT as the redline.
+                # E.g. When the client uploads a Redlined doc, it has no clauses yet.
+                pass
+
+    except Exception as e:
+        print(f"[ERROR] Fetching redline data for Google Docs: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
+
+    # If no clauses exist (like an uploaded redline document), try to upload the raw file
+    if not clause_rows:
+        try:
+            file_bytes = None
+            if s3_key:
+                try:
+                    response = s3_client.get_object(Bucket=BUCKET_NAME, Key=s3_key)
+                    file_bytes = response['Body'].read()
+                except Exception as s3_e:
+                    print(f"[S3 Warning] Failed to fetch from S3: {s3_e}")
+            
+            if not file_bytes and file_path and os.path.exists(file_path):
+                with open(file_path, "rb") as f:
+                    file_bytes = f.read()
+            
+            if not file_bytes:
+                raise HTTPException(status_code=404, detail="Original document file could not be found to upload to Google Docs.")
+            
+            from google_drive_service import upload_to_google_docs
+            doc_id = upload_to_google_docs(file_bytes, original_filename)
+            
+            # Save ID to DB
+            conn2 = db_pool.getconn()
+            try:
+                with conn2.cursor() as cur2:
+                    cur2.execute("UPDATE documents SET google_doc_id = %s WHERE id = %s", (doc_id, document_id))
+                    conn2.commit()
+            except Exception as db_e:
+                print(f"[ERROR] Saving google_doc_id to DB: {db_e}")
+                conn2.rollback()
+            finally:
+                db_pool.putconn(conn2)
+                
+            return {"url": f"https://docs.google.com/document/d/{doc_id}/edit"}
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Failed to upload raw document to Google Doc: {str(e)}")
+
+    # Otherwise, Generate Redlined Docx locally first
+    from docx.shared import RGBColor
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    import difflib
+    from datetime import datetime
+    import docx
+    import tempfile
+
+    document = docx.Document()
+    
+    # Comments part setup
+    comments_part = None
+    if 'comments' not in document.part.rels:
+        try:
+            from docx.opc.part import XmlPart
+            from docx.oxml import parse_xml
+            from docx.opc.constants import RELATIONSHIP_TYPE, CONTENT_TYPE
+            from docx.opc.packuri import PackURI
+            comments_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"></w:comments>'
+            comments_part = XmlPart(PackURI('/word/comments.xml'), CONTENT_TYPE.WML_COMMENTS, parse_xml(comments_xml.encode('utf-8')), document.part.package)
+            document.part.relate_to(comments_part, RELATIONSHIP_TYPE.COMMENTS)
+        except Exception:
+            pass
+    else:
+        comments_part = document.part.rels['comments'].target_part
+
+    comment_id_counter = 0
+    tc_id_counter = 1
+
+    sug_map = {}
+    for s in all_sugs:
+        cid = s[0]
+        if cid not in sug_map: sug_map[cid] = []
+        sug_map[cid].append(s)
+
+    for idx, row in enumerate(clause_rows):
+        cid, original, accepted_edited, comment = row
+        p = document.add_paragraph()
+        
+        final_text = accepted_edited or original
+        for s in sug_map.get(cid, []):
+            if s[5] == 'pending':
+                if s[1] == final_text:
+                    final_text = s[2]
+                elif s[1] in final_text:
+                    final_text = final_text.replace(s[1], s[2], 1)
+
+        if final_text == original:
+            p.add_run(original)
+        else:
+            seq = difflib.SequenceMatcher(None, original, final_text)
+            for opcode, i1, i2, j1, j2 in seq.get_opcodes():
+                if opcode == 'equal':
+                    p.add_run(original[i1:i2])
+                elif opcode in ('delete', 'replace'):
+                    del_elem = OxmlElement('w:del')
+                    del_elem.set(qn('w:id'), str(tc_id_counter))
+                    tc_id_counter += 1
+                    del_elem.set(qn('w:author'), "LACCIS Redline")
+                    del_elem.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
+                    r = OxmlElement('w:r')
+                    dt = OxmlElement('w:delText')
+                    dt.text = original[i1:i2]
+                    if original[i1:i2].startswith(' ') or original[i1:i2].endswith(' '):
+                        dt.set(qn('xml:space'), 'preserve')
+                    r.append(dt)
+                    del_elem.append(r)
+                    p._p.append(del_elem)
+                
+                if opcode in ('insert', 'replace'):
+                    ins = OxmlElement('w:ins')
+                    ins.set(qn('w:id'), str(tc_id_counter))
+                    tc_id_counter += 1
+                    ins.set(qn('w:author'), "LACCIS Redline")
+                    ins.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
+                    r = OxmlElement('w:r')
+                    t = OxmlElement('w:t')
+                    t.text = final_text[j1:j2]
+                    if final_text[j1:j2].startswith(' ') or final_text[j1:j2].endswith(' '):
+                        t.set(qn('xml:space'), 'preserve')
+                    r.append(t)
+                    ins.append(r)
+                    p._p.append(ins)
+
+        if comment and comments_part is not None:
+            comment_id_str = str(comment_id_counter)
+            comment_id_counter += 1
+            comment_elem = OxmlElement('w:comment')
+            comment_elem.set(qn('w:id'), comment_id_str)
+            comment_elem.set(qn('w:author'), "Legal Team")
+            c_p = OxmlElement('w:p')
+            c_r = OxmlElement('w:r')
+            c_t = OxmlElement('w:t')
+            c_t.text = comment
+            c_r.append(c_t)
+            c_p.append(c_r)
+            comment_elem.append(c_p)
+            comments_part.element.append(comment_elem)
+            comment_start = OxmlElement('w:commentRangeStart')
+            comment_start.set(qn('w:id'), comment_id_str)
+            p._p.insert(0, comment_start)
+            comment_end = OxmlElement('w:commentRangeEnd')
+            comment_end.set(qn('w:id'), comment_id_str)
+            p._p.append(comment_end)
+
+            comment_ref_r = OxmlElement('w:r')
+            comment_ref = OxmlElement('w:commentReference')
+            comment_ref.set(qn('w:id'), comment_id_str)
+            comment_ref_r.append(comment_ref)
+            p._p.append(comment_ref_r)
+            
+        if idx < len(clause_rows) - 1:
+            document.add_paragraph()
+
+    # Save to temp file
+    fd, path = tempfile.mkstemp(suffix=".docx")
+    os.close(fd)
+    
+    try:
+        document.save(path)
+        
+        # Read file bytes
+        with open(path, "rb") as f:
+            file_bytes = f.read()
+            
+        # Clean up temp file
+        os.remove(path)
+        
+        # Upload to Google Docs
+        from google_drive_service import upload_to_google_docs
+        googledoc_filename = f"Redlined_{original_filename.replace('.pdf', '').replace('.txt', '')}"
+        doc_id = upload_to_google_docs(file_bytes, googledoc_filename)
+        
+        # Save ID to DB
+        conn2 = db_pool.getconn()
+        try:
+            with conn2.cursor() as cur2:
+                cur2.execute("UPDATE documents SET google_doc_id = %s WHERE id = %s", (doc_id, document_id))
+                conn2.commit()
+        except Exception as db_e:
+            print(f"[ERROR] Saving google_doc_id to DB: {db_e}")
+            conn2.rollback()
+        finally:
+            db_pool.putconn(conn2)
+            
+        return {"url": f"https://docs.google.com/document/d/{doc_id}/edit"}
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        if os.path.exists(path):
+            os.remove(path)
+        raise HTTPException(status_code=500, detail=f"Failed to generate or upload Google Doc: {str(e)}")
+
+@app.post("/api/documents/google-doc/{document_id}")
+def open_in_google_docs(document_id: str, background_tasks: BackgroundTasks, current_user: dict = Depends(verify_token)):
+    import os
+    import traceback
+    
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # 1. Check if google_doc_id already exists
+            cur.execute("SELECT filename, google_doc_id, document_type, s3_key, file_path FROM documents WHERE id = %s", (document_id,))
+            doc_res = cur.fetchone()
+            if not doc_res:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            original_filename = doc_res[0]
+            existing_doc_id = doc_res[1]
+            document_type = doc_res[2]
+            s3_key = doc_res[3]
+            file_path = doc_res[4]
+            
+            
+            if existing_doc_id:
+                return {"url": f"https://docs.google.com/document/d/{existing_doc_id}/edit"}
+            
+            is_uploaded_redline = document_type and ("Redlined" in document_type or "(Redlined)" in document_type)
+            
+            # 2. Since this is for simple document review via Dashboard "Review" button on Redlined docs
+            # If it's a generated redline doc with system edits, we MUST build the redline DOCX with changes
+            
+            cur.execute(
+                """
+                SELECT c.content_id, c.content, e.edited_clause, e.comment
+                FROM clauses c
+                LEFT JOIN edited_clauses e ON c.content_id = e.content_id
+                WHERE c.document_id = %s
+                ORDER BY c.page_number ASC, c.ctid ASC
+                """,
+                (document_id,)
+            )
+            clause_rows = cur.fetchall()
+            
+            if clause_rows:
+                # Delegate to the Redline Generation Logic when System Edits exist
+                pass 
+            else:
+                # Upload the raw file directly (For basic PDF/Docx without clauses)
+                file_bytes = None
+                if s3_key:
+                    try:
+                        response = s3_client.get_object(Bucket=BUCKET_NAME, Key=s3_key)
+                        file_bytes = response['Body'].read()
+                    except Exception as s3_e:
+                        print(f"[S3 Warning] Failed to fetch: {s3_e}")
+                
+                if not file_bytes and file_path and os.path.exists(file_path):
+                    with open(file_path, "rb") as f:
+                        file_bytes = f.read()
+                
+                if not file_bytes:
+                    raise HTTPException(status_code=404, detail="Original document file could not be found to upload to Google Docs.")
+                
+                from google_drive_service import upload_to_google_docs
+                doc_id = upload_to_google_docs(file_bytes, original_filename)
+                
+                # Save ID to DB
+                cur.execute("UPDATE documents SET google_doc_id = %s WHERE id = %s", (doc_id, document_id))
+                conn.commit()
+                
+                return {"url": f"https://docs.google.com/document/d/{doc_id}/edit"}
+            
+    except Exception as e:
+        print(f"[ERROR] Fetching and uploading doc for Google Docs: {e}")
+        import traceback
+        traceback.print_exc()
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
+
+    # 3. If there ARE clauses, generate Redlined Docx locally first
+    from docx.shared import RGBColor
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    import difflib
+    from datetime import datetime
+    import docx
+    import tempfile
+
+    document = docx.Document()
+    
+    # Comments part setup
+    comments_part = None
+    if 'comments' not in document.part.rels:
+        try:
+            from docx.opc.part import XmlPart
+            from docx.oxml import parse_xml
+            from docx.opc.constants import RELATIONSHIP_TYPE, CONTENT_TYPE
+            from docx.opc.packuri import PackURI
+            comments_xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"></w:comments>'
+            comments_part = XmlPart(PackURI('/word/comments.xml'), CONTENT_TYPE.WML_COMMENTS, parse_xml(comments_xml.encode('utf-8')), document.part.package)
+            document.part.relate_to(comments_part, RELATIONSHIP_TYPE.COMMENTS)
+        except Exception:
+            pass
+    else:
+        comments_part = document.part.rels['comments'].target_part
+
+    comment_id_counter = 0
+    tc_id_counter = 1
+
+    # Fetch Suggestions
+    conn = db_pool.getconn()
+    all_sugs = []
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                SELECT content_id, original_text, suggested_text, author, timestamp, status
+                FROM clause_suggestions
+                WHERE document_id = %s AND status IN ('pending', 'accepted')
+                ORDER BY timestamp ASC
+            """, (document_id,))
+            all_sugs = cur.fetchall()
+    except Exception as e:
+        pass
+    finally:
+        db_pool.putconn(conn)
+
+    sug_map = {}
+    for s in all_sugs:
+        cid = s[0]
+        if cid not in sug_map: sug_map[cid] = []
+        sug_map[cid].append(s)
+
+    for idx, row in enumerate(clause_rows):
+        cid, original, accepted_edited, comment = row
+        p = document.add_paragraph()
+        
+        final_text = accepted_edited or original
+        for s in sug_map.get(cid, []):
+            if s[5] == 'pending':
+                if s[1] == final_text:
+                    final_text = s[2]
+                elif s[1] in final_text:
+                    final_text = final_text.replace(s[1], s[2], 1)
+
+        if final_text == original:
+            p.add_run(original)
+        else:
+            seq = difflib.SequenceMatcher(None, original, final_text)
+            for opcode, i1, i2, j1, j2 in seq.get_opcodes():
+                if opcode == 'equal':
+                    p.add_run(original[i1:i2])
+                elif opcode in ('delete', 'replace'):
+                    del_elem = OxmlElement('w:del')
+                    del_elem.set(qn('w:id'), str(tc_id_counter))
+                    tc_id_counter += 1
+                    del_elem.set(qn('w:author'), "LACCIS Redline")
+                    del_elem.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
+                    r = OxmlElement('w:r')
+                    dt = OxmlElement('w:delText')
+                    dt.text = original[i1:i2]
+                    if original[i1:i2].startswith(' ') or original[i1:i2].endswith(' '):
+                        dt.set(qn('xml:space'), 'preserve')
+                    r.append(dt)
+                    del_elem.append(r)
+                    p._p.append(del_elem)
+                
+                if opcode in ('insert', 'replace'):
+                    ins = OxmlElement('w:ins')
+                    ins.set(qn('w:id'), str(tc_id_counter))
+                    tc_id_counter += 1
+                    ins.set(qn('w:author'), "LACCIS Redline")
+                    ins.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
+                    r = OxmlElement('w:r')
+                    t = OxmlElement('w:t')
+                    t.text = final_text[j1:j2]
+                    if final_text[j1:j2].startswith(' ') or final_text[j1:j2].endswith(' '):
+                        t.set(qn('xml:space'), 'preserve')
+                    r.append(t)
+                    ins.append(r)
+                    p._p.append(ins)
+
+        if comment and comments_part is not None:
+            comment_id_str = str(comment_id_counter)
+            comment_id_counter += 1
+            comment_elem = OxmlElement('w:comment')
+            comment_elem.set(qn('w:id'), comment_id_str)
+            comment_elem.set(qn('w:author'), "Legal Team")
+            c_p = OxmlElement('w:p')
+            c_r = OxmlElement('w:r')
+            c_t = OxmlElement('w:t')
+            c_t.text = comment
+            c_r.append(c_t)
+            c_p.append(c_r)
+            comment_elem.append(c_p)
+            comments_part.element.append(comment_elem)
+            comment_start = OxmlElement('w:commentRangeStart')
+            comment_start.set(qn('w:id'), comment_id_str)
+            p._p.insert(0, comment_start)
+            comment_end = OxmlElement('w:commentRangeEnd')
+            comment_end.set(qn('w:id'), comment_id_str)
+            p._p.append(comment_end)
+
+            comment_ref_r = OxmlElement('w:r')
+            comment_ref = OxmlElement('w:commentReference')
+            comment_ref.set(qn('w:id'), comment_id_str)
+            comment_ref_r.append(comment_ref)
+            p._p.append(comment_ref_r)
+            
+        if idx < len(clause_rows) - 1:
+            document.add_paragraph()
+
+    # Save to temp file
+    fd, path = tempfile.mkstemp(suffix=".docx")
+    os.close(fd)
+    
+    try:
+        document.save(path)
+        
+        # Read file bytes
+        with open(path, "rb") as f:
+            file_bytes = f.read()
+            
+        # Clean up temp file
+        os.remove(path)
+        
+        # Upload to Google Docs
+        from google_drive_service import upload_to_google_docs
+        googledoc_filename = f"Redlined_{original_filename.replace('.pdf', '').replace('.txt', '')}"
+        doc_id = upload_to_google_docs(file_bytes, googledoc_filename)
+        
+        # Save ID to DB
+        conn2 = db_pool.getconn()
+        try:
+            with conn2.cursor() as cur2:
+                cur2.execute("UPDATE documents SET google_doc_id = %s WHERE id = %s", (doc_id, document_id))
+                conn2.commit()
+        except Exception as db_e:
+            print(f"[ERROR] Saving google_doc_id to DB: {db_e}")
+            conn2.rollback()
+        finally:
+            db_pool.putconn(conn2)
+            
+        return {"url": f"https://docs.google.com/document/d/{doc_id}/edit"}
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        if os.path.exists(path):
+            os.remove(path)
+        raise HTTPException(status_code=500, detail=f"Failed to generate or upload Google Doc: {str(e)}")
+
 @app.get("/api/documents/download/{document_id}")
 def download_document(document_id: str, current_user: dict = Depends(verify_token)):
     if not db_pool:
