@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './DocumentsTable.css';
 
@@ -55,6 +56,35 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, o
         } catch (err) {
             console.error('Download error:', err);
             alert('Download failed');
+        }
+    };
+
+    const [loadingDocs, setLoadingDocs] = useState({});
+
+    const handleReviewClick = async (doc) => {
+        if (doc.document_type?.includes('Redlined')) {
+            setLoadingDocs(prev => ({ ...prev, [doc.id]: true }));
+            try {
+                const token = localStorage.getItem('token');
+                const res = await fetch(`${API_URL}/api/documents/google-doc/${doc.id}`, {
+                    method: 'POST',
+                    headers: { 'Authorization': `Bearer ${token}` }
+                });
+                if (!res.ok) throw new Error('Failed to open Google Docs');
+                const data = await res.json();
+                window.open(data.url, '_blank');
+            } catch (err) {
+                console.error('API Error:', err);
+                alert('Could not open document in Google Docs.');
+            } finally {
+                setLoadingDocs(prev => ({ ...prev, [doc.id]: false }));
+            }
+        } else {
+            navigate(
+                isAdmin
+                    ? `/review/${doc.id}`
+                    : `/analysis/${doc.id}`
+            );
         }
     };
 
@@ -157,19 +187,17 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, o
                                         >
                                             ⬇
                                         </button>
-                                        {doc.document_type !== 'Redlined' && (
-                                            <button
-                                                className="btn-action btn-review"
-                                                onClick={() => navigate(
-                                                    isAdmin
-                                                        ? `/review/${doc.id}`      // Legal/Admin → Master-Detail Review
-                                                        : `/analysis/${doc.id}`    // Client → Simple Analysis view
-                                                )}
-                                                title={isAdmin ? "Review Clauses (SBERT + AI)" : "View AI Analysis"}
-                                            >
-                                                {isAdmin ? '🔍 Review' : 'View'}
-                                            </button>
-                                        )}
+                                        <button
+                                            className="btn-action btn-review"
+                                            onClick={() => handleReviewClick(doc)}
+                                            title={isAdmin ? "Review Clauses (SBERT + AI)" : "View AI Analysis"}
+                                            disabled={loadingDocs[doc.id]}
+                                        >
+                                            {loadingDocs[doc.id] 
+                                                ? <span className="spinner-small" style={{ margin: '0 8px' }}/> 
+                                                : (isAdmin ? '🔍 Review' : 'View')
+                                            }
+                                        </button>
                                     </div>
                                 </td>
                             )}
