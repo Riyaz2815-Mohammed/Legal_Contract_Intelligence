@@ -1,10 +1,14 @@
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status, BackgroundTasks, Form
 import os
-import asyncio
+import sys
 
 # --- Fix for WinError 1114 (Torch DLL crash on Windows) ---
 # Force torch to use CPU to avoid DLL initialization conflicts with GPU drivers
+# Must be set BEFORE torch is imported anywhere
 os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
+os.environ["MKL_SERVICE_FORCE_INTEL"] = "1" # Extra safety for MKL
+
+import asyncio
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status, BackgroundTasks, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
@@ -12,7 +16,6 @@ from typing import Optional, List
 import secrets
 import uuid
 import requests
-import sys
 from datetime import datetime, timedelta
 import jwt
 import os
@@ -29,7 +32,18 @@ from botocore.config import Config
 import psycopg2
 from psycopg2 import pool
 
+import time
+
+print("[STARTUP] Initializing FastAPI app...")
 app = FastAPI(title="LACCIS API", description="Legal Clause Classification Intelligence System")
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    print(f"INFO:     {request.client.host if request.client else 'unknown'} - \"{request.method} {request.url.path}\" {response.status_code} {process_time:.4f}s")
+    return response
 
 # CORS middleware
 app.add_middleware(
@@ -73,16 +87,17 @@ DATABASE_URL = os.getenv("DATABASE_URL")
 db_pool = None
 if DATABASE_URL:
     try:
+        print("[DATABASE] Attempting to initialize PostgreSQL Connection Pool...")
         db_pool = psycopg2.pool.ThreadedConnectionPool(
             1, 20, DATABASE_URL
         )
-        print("[DATABASE] PostgreSQL Connection Pool initialized")
+        print("[DATABASE] PostgreSQL Connection Pool initialized successfully")
     except Exception as e:
         print(f"[ERROR] Database pool initialization failed: {e}")
 else:
     print("[DATABASE] DATABASE_URL missing")
 
-# Initialize S3 Client with timeouts to prevent infinite hang
+print("[STARTUP] Initializing S3 client...")
 s3_client = boto3.client(
     's3',
     aws_access_key_id=AWS_ACCESS_KEY,
@@ -94,6 +109,7 @@ s3_client = boto3.client(
         retries={'max_attempts': 2}
     )
 )
+print("[STARTUP] S3 client initialized.")
 
 # Debug: Print if credentials are loaded
 print(f"[AWS/EMAIL] EMAILJS_SERVICE_ID loaded: {bool(EMAILJS_SERVICE_ID)}")
@@ -2562,7 +2578,7 @@ async def upload_template(background_tasks: BackgroundTasks, file: UploadFile = 
             record_activity(current_user["user_id"], "admin", "Uploaded standard template", f"Type: {template_type}")
             
             # Trigger extraction in background
-            background_tasks.add_task(trigger_extraction, file_name, template_type, "legal")
+            background_tasks.add_task(trigger_extraction, file_name, tmpl_id, template_type, "legal")
             
             return {"message": "Template uploaded and processing", "id": tmpl_id}
     except Exception as e:
@@ -3216,4 +3232,4 @@ def document_chat(
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True, access_log=True, log_level="info")
