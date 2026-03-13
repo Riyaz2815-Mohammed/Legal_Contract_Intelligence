@@ -12,7 +12,7 @@ _SKIP_MATCH_TYPES = {"Header", "Other", "Preamble"}
 _CLAUSE_ALIASES: dict[str, list[str]] = {
     "Term":                      ["Term", "Duration"],
     "Termination":               ["Termination", "Effect of Termination"],
-    "Governing Law":             ["Governing Law", "Dispute Resolution"],
+    "Governing Law / Jurisdiction / Dispute Resolution": ["Governing Law", "Dispute Resolution", "Governing Law / Jurisdiction / Dispute Resolution"],
     "Confidentiality":           ["Confidentiality", "Non-Disclosure"],
     "Limitation of Liability":   ["Limitation of Liability"],
     "Intellectual Property Rights": ["Intellectual Property Rights", "IP Rights"],

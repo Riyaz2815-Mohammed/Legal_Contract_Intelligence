@@ -15,29 +15,58 @@ except (OSError, ImportError):
 # Structural parsing helpers
 # ──────────────────────────────────────────────────────────────────────────────
 
+def is_mostly_title_case(text: str) -> bool:
+    """
+    Heuristic to check if a string looks like a title/heading rather than a sentence.
+    Titles usually have major words capitalized and don't end in sentence punctuation.
+    """
+    words = text.split()
+    if not words:
+        return False
+    
+    # If all caps, it's a heading
+    if text.isupper():
+        return True
+        
+    # Check capitalization of first letters
+    cap_count = sum(1 for w in words if w[0].isupper())
+    
+    # If more than 50% of words start with capital letter, it's likely a title
+    return (cap_count / len(words)) >= 0.5
+
 def extract_structural_id(text: str) -> Optional[str]:
     """
-    Returns a match string if the line looks like a major new clause heading,
-    otherwise None.  Sub-bullets (1.1, (a), (i)) are intentionally excluded so
-    they remain grouped under their parent heading.
+    STRICT MODE V2: Only returns a match string if the line looks like a major 
+    numbered clause title (e.g. '1. Purpose'). 
+    Excludes sentences, sub-bullets, and introductory items.
     """
-    patterns = [
-        r"^(Section\s+\d+)",               # Section 1
-        r"^(Article\s+\d+)",               # Article 1
-        r"^(\d+\.\s+[A-Z])",               # 1. Indemnification
-        r"^([0-9]+\s+[A-Z][a-z]+)",        # 1 Indemnity
-        r"^([IVXLCDM]+\.\s+[A-Z])",        # Roman  I. Title
-        r"^([A-Z][A-Z\s]{3,})$",           # ALL CAPS HEADERS (≥ 4 chars)
-        r"^(Clause\s+\d+)",                # Clause 1
-    ]
     text_clean = text.strip()
-    if len(text_clean) < 4:
+    if len(text_clean) < 4 or len(text_clean) > 100:
         return None
-    for pattern in patterns:
-        m = re.match(pattern, text_clean)
-        if m:
-            return m.group(1)
-    return None
+
+    # Strict regex: Number -> Period -> Space -> Text
+    pattern = r"^(\d+\.\s+.+)$"
+    m = re.match(pattern, text_clean)
+    if not m:
+        return None
+        
+    heading_text = m.group(1)
+    
+    # Exclude if it looks like a sub-point (e.g. 1.1)
+    if re.match(r"^\d+\.\d+", text_clean):
+        return None
+        
+    # Exclude if it ends with sentence punctuation (headings shouldn't)
+    if text_clean.endswith(('.', ';', ':', ',')):
+        return None
+        
+    # Heuristic: Must look like a title (Title Case or ALL CAPS)
+    # We strip the "1. " part for the title check
+    title_part = re.sub(r"^\d+\.\s+", "", heading_text)
+    if not is_mostly_title_case(title_part):
+        return None
+        
+    return heading_text
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -123,12 +152,14 @@ _TITLE_RULES: list[tuple[str, list[str]]] = [
         r"\bprivacy\s+policy\b",
         r"\bpersonal\s+data\b",
     ]),
-    ("Governing Law", [
+    ("Governing Law / Jurisdiction / Dispute Resolution", [
         r"\bgoverning\s+law\b",
         r"\bapplicable\s+law\b",
         r"\bdispute\s+resolution\b",
         r"\bjurisdiction\b",
         r"\barbitration\b",
+        r"\bmediation\b",
+        r"\bexpert\s+determination\b",
     ]),
     ("Force Majeure", [
         r"\bforce\s+majeure\b",
@@ -199,10 +230,43 @@ _TITLE_RULES: list[tuple[str, list[str]]] = [
         r"\bnon.?competition\b",
         r"\brestrictive\s+covenant\b",
     ]),
-    ("Dispute Resolution", [
-        r"\bdispute\s+resolution\b",
-        r"\bmediation\b",
-        r"\bexpert\s+determination\b",
+    ("Referrer’s Responsibilities", [
+        r"\breferrer.?s\s+responsibilities\b",
+        r"\breferrer\s+obligations\b",
+        r"\breferral\s+partner\s+obligations\b",
+    ]),
+    ("Solution Provider’s Responsibilities", [
+        r"\bsolution\s+provider.?s\s+responsibilities\b",
+        r"\bsolution\s+provider\s+obligations\b",
+        r"\bcompany\s+obligations\b",
+        r"\bcompany\s+responsibilities\b",
+    ]),
+    ("Referral Fee", [
+        r"\breferral\s+fees?\b",
+        r"\bcommission\b",
+        r"\bfinder.?s\s+fee\b",
+    ]),
+    ("Joint Notification Clause", [
+        r"\bjoint\s+notification\b",
+        r"\bmutual\s+notice\b",
+    ]),
+    ("Visibility & Reporting Rights", [
+        r"\bvisibility\b",
+        r"\breporting\s+rights?\b",
+        r"\breporting\s+obligations?\b",
+    ]),
+    ("Non-Circumvention", [
+        r"\bnon.?circumvention\b",
+        r"\bbypass\b",
+    ]),
+    ("Exclusivity", [
+        r"\bexclusivity\b",
+        r"\bexclusive\b",
+    ]),
+    ("Amendments", [
+        r"\bamendments?\b",
+        r"\bmodifications?\b",
+        r"\bvariation\b",
     ]),
 ]
 
@@ -215,7 +279,7 @@ _BODY_RULES: dict[str, list[tuple[str, int]]] = {
     "Warranty":                   [("warrant", 2), ("warranty", 2), ("warranties", 2), ("merchantability", 3), ("fitness for a particular purpose", 3), ("as-is", 2), ("disclaimer", 2)],
     "Termination":                [("terminate this agreement", 3), ("written notice to terminate", 3), ("survival upon termination", 3), ("effect of termination", 4), ("termination for cause", 4), ("termination for convenience", 4)],
     "Term":                       [("initial term", 3), ("term of this agreement", 4), ("in force for a period", 3), ("automatically renew", 3), ("commencement date", 2), ("effective date", 1)],
-    "Governing Law":              [("governed by the laws", 3), ("jurisdiction of", 2), ("courts of", 2), ("arbitration clause", 3), ("dispute resolution", 2)],
+    "Governing Law / Jurisdiction / Dispute Resolution": [("governed by the laws", 3), ("jurisdiction of", 2), ("courts of", 2), ("arbitration", 3), ("dispute resolution", 3), ("mediation", 2)],
     "Intellectual Property Rights": [("intellectual property", 3), ("ip rights", 3), ("copyright", 2), ("trademark", 2), ("patent", 2), ("license grant", 3), ("moral rights", 2)],
     "Data Protection and Security": [("personal data", 3), ("data protection", 3), ("gdpr", 4), ("privacy", 2), ("data breach", 3), ("security measures", 2)],
     "Force Majeure":              [("force majeure", 4), ("act of god", 3), ("pandemic", 2), ("beyond reasonable control", 3), ("unforeseeable", 2)],
@@ -229,9 +293,15 @@ _BODY_RULES: dict[str, list[tuple[str, int]]] = {
     "Relationship":               [("independent contractor", 4), ("not an employee", 3), ("employer-employee", 3)],
     "Non-Solicitation":           [("non-solicitation", 4), ("not to solicit", 3), ("solicitation of employees", 4)],
     "Non-Compete":                [("non-compete", 4), ("non-competition", 4), ("restrictive covenant", 3)],
-    "Dispute Resolution":         [("dispute resolution", 3), ("mediation", 3), ("expert determination", 3)],
-    "Audit Rights":               [("audit rights", 4), ("right to audit", 4), ("record keeping", 2), ("inspection rights", 3)],
     "Purpose":                    [("purpose of this agreement", 4), ("scope of services", 3), ("engagement description", 3)],
+    "Referrer’s Responsibilities": [("referrer responsibilities", 4), ("obligations of referrer", 3), ("referral partner", 3)],
+    "Solution Provider’s Responsibilities": [("solution provider", 3), ("company responsibilities", 3)],
+    "Referral Fee":               [("referral fee", 4), ("commission", 3), ("payment of fees", 2)],
+    "Joint Notification Clause":   [("joint notification", 4), ("notify jointly", 3)],
+    "Visibility & Reporting Rights": [("reporting rights", 4), ("visibility", 3), ("reports", 2)],
+    "Non-Circumvention":          [("non-circumvention", 4), ("circumvent", 3), ("bypass", 3)],
+    "Exclusivity":                [("exclusivity", 4), ("exclusive basis", 3), ("sole provider", 3)],
+    "Amendments":                 [("amended", 3), ("modified in writing", 3), ("modification", 2)],
 }
 
 
@@ -359,9 +429,13 @@ def parse_text(text: str) -> List[Dict[str, Any]]:
 
     extracted_blocks = []
     current_page = 1
-    current_heading = "Preamble"
+    current_heading = None
     current_content_lines: list[str] = []
     current_block_start_page = 1
+    
+    # Preamble tracking
+    found_transition = False
+    transition_keywords = ["NOW THEREFORE", "AGREE AS FOLLOWS", "WITNESSETH", "IT IS AGREED"]
 
     for line in text.splitlines():
         line_stripped = line.strip()
@@ -372,29 +446,52 @@ def parse_text(text: str) -> List[Dict[str, Any]]:
             current_page = int(page_match.group(1))
             continue
 
-        # Skip separator lines & blank lines
-        if re.match(r"^-+$", line_stripped) or not line_stripped:
+        if not line_stripped:
             continue
+            
+        # Look for transition from Preamble to Clauses
+        if not found_transition:
+            for kw in transition_keywords:
+                if kw in line_stripped.upper():
+                    found_transition = True
+                    break
 
         match = extract_structural_id(line_stripped)
+        
+        # We only accept a heading if:
+        # 1. We've passed the "NOW THEREFORE" transition
+        # 2. OR it's a very clear heading (Title Case) and we decide to break in
         if match is not None:
+            # If we haven't found transition yet, we are extra strict
+            title_part = re.sub(r"^\d+\.\s+", "", match)
+            is_strong_heading = title_part.isupper() or (len(title_part.split()) <= 5 and is_mostly_title_case(title_part))
+            
+            if not found_transition and not is_strong_heading:
+                # Still in preamble, ignore this numbered sentence
+                continue
+
             # Flush previous block
-            full_content = "\n".join(current_content_lines).strip()
-            if len(full_content) > 10 or current_heading != "Preamble":
+            if current_heading:
+                full_content = "\n".join(current_content_lines).strip()
                 extracted_blocks.append({
                     "page_number": current_block_start_page,
                     "heading":     current_heading,
                     "content":     full_content,
                 })
-            current_heading = line_stripped
+            
+            # Start new block
+            current_heading = match
             current_content_lines = []
             current_block_start_page = current_page
+            found_transition = True # Once we hit the first real clause, we are out of preamble
         else:
+            if current_heading is None:
+                continue
             current_content_lines.append(line_stripped)
 
     # Flush last block
-    full_content = "\n".join(current_content_lines).strip()
-    if len(full_content) > 10 or current_heading != "Preamble":
+    if current_heading:
+        full_content = "\n".join(current_content_lines).strip()
         extracted_blocks.append({
             "page_number": current_block_start_page,
             "heading":     current_heading,
