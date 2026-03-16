@@ -112,7 +112,7 @@ function FromLegalTable({ contracts, loading, onAccept, onReject }) {
                             <td className="fl-filename">{contract.filename}</td>
                             <td>
                                 <span className={`fl-type-badge ${contract.document_type?.includes('Redlined') ? 'type-redlined' : ''}`}>
-                                    {contract.document_type || 'PDF'}
+                                    {contract.document_type || 'PDF'}{contract.is_finalized ? '(Final)' : ''}
                                 </span>
                             </td>
                             <td>{new Date(contract.shared_at).toLocaleDateString()}</td>

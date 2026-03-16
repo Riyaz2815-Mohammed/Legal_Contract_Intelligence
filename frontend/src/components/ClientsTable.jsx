@@ -1,5 +1,7 @@
 import './ClientsTable.css';
 import StatusBadge from './StatusBadge';
+const API_URL = 'http://localhost:8000';
+
 
 function ClientsTable({ clients, loading, onDelete, onOpenWorkspace }) {
     if (loading) {
@@ -76,27 +78,58 @@ function ClientsTable({ clients, loading, onDelete, onOpenWorkspace }) {
                                 </div>
                             </td>
                             <td>
-                                {client.finalizedDocName ? (
-                                    <div className="finalized-doc-badge" style={{
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: '0.5rem',
-                                        padding: '0.4rem 0.8rem',
-                                        background: 'rgba(16, 185, 129, 0.1)',
-                                        color: '#059669',
-                                        borderRadius: '20px',
-                                        fontSize: '0.85rem',
-                                        fontWeight: '500',
-                                        maxWidth: '200px'
-                                    }}>
-                                        <span className="doc-icon">📄</span>
-                                        <span className="doc-name-text" style={{
-                                            overflow: 'hidden',
-                                            textOverflow: 'ellipsis',
-                                            whiteSpace: 'nowrap'
-                                        }} title={client.finalizedDocName}>
-                                            {client.finalizedDocName}
-                                        </span>
+                                {client.finalizedDocs && client.finalizedDocs.length > 0 ? (
+                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                        {client.finalizedDocs.map((doc) => {
+                                            const token = localStorage.getItem('token');
+                                            const downloadUrl = `${API_URL}/api/documents/download/${doc.id}`;
+                                            
+                                            // Handle click to download via direct S3 URL fetch
+                                            const handleClick = async (e) => {
+                                                e.preventDefault();
+                                                try {
+                                                    const res = await fetch(downloadUrl, {
+                                                        headers: { 'Authorization': `Bearer ${token}` }
+                                                    });
+                                                    const data = await res.json();
+                                                    if (data.download_url) {
+                                                        window.open(data.download_url, '_blank');
+                                                    } else {
+                                                        alert('Download failed');
+                                                    }
+                                                } catch (err) {
+                                                    console.error('Download error:', err);
+                                                    alert('Download error');
+                                                }
+                                            };
+
+                                            return (
+                                                <a
+                                                    key={doc.id}
+                                                    href="#"
+                                                    onClick={handleClick}
+                                                    className="finalized-doc-link"
+                                                    style={{
+                                                        display: 'flex',
+                                                        alignItems: 'center',
+                                                        gap: '0.4rem',
+                                                        padding: '0.3rem 0.6rem',
+                                                        background: 'rgba(16, 185, 129, 0.1)',
+                                                        color: '#059669',
+                                                        borderRadius: '12px',
+                                                        fontSize: '0.75rem',
+                                                        fontWeight: '600',
+                                                        textDecoration: 'none',
+                                                        whiteSpace: 'nowrap',
+                                                        transition: 'all 0.2s ease'
+                                                    }}
+                                                >
+                                                    <span>📄</span>
+                                                    {doc.type === 'RA' ? 'Referral' : doc.type} Final
+
+                                                </a>
+                                            );
+                                        })}
                                     </div>
                                 ) : (
                                     <span style={{ color: '#94a3b8', fontSize: '0.85rem', fontStyle: 'italic' }}>No finalized doc</span>

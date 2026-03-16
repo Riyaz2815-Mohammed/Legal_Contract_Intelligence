@@ -150,6 +150,7 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, o
                                     fontSize: '0.875rem'
                                 }}>
                                     {doc.document_type || 'Others'}
+                                    {doc.is_finalized ? '(Final)' : (doc.client_marked_final ? '(Client Final)' : '')}
                                 </span>
                             </td>
                             <td>{new Date(doc.uploaded_at).toLocaleDateString()}</td>

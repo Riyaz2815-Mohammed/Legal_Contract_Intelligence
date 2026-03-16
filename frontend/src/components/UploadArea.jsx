@@ -9,6 +9,7 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
     const [documentType, setDocumentType] = useState('');
     const [step, setStep] = useState(1);
     const [error, setError] = useState('');
+    const [isFinalized, setIsFinalized] = useState(false);
 
     // Set the document type as "Type (Redlined)" if they clicked Upload Redlined
     const handleStep1Complete = () => {
@@ -85,7 +86,12 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                     headers: {
                         'Authorization': `Bearer ${token}`
                     },
-                    body: formData
+                    body: (function () {
+                        const fd = new FormData();
+                        fd.append('file', fileObj.file);
+                        fd.append('is_final', isFinalized);
+                        return fd;
+                    })()
                 }
             );
 
@@ -100,7 +106,9 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                     }
                     return updated;
                 });
+                setIsFinalized(false);
                 onUploadComplete();
+
             } else {
                 const data = await response.json();
                 setError(data.detail || 'Upload failed');
@@ -164,13 +172,15 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                             <option value="NDA">NDA (Non-Disclosure Agreement)</option>
                             <option value="MSA">MSA (Master Service Agreement)</option>
                             <option value="SOW">SOW (Statement of Work)</option>
-                            <option value="RA">RA (Registration Agreement)</option>
+                            <option value="RA">Referral Agreement</option>
+
                         </select>
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '1rem' }}>
                             {documentType === 'NDA' && '✨ Automated extraction and classification will be performed for NDAs.'}
-                            {documentType === 'RA' && 'Registration Agreement - Document storage.'}
+                            {documentType === 'RA' && 'Referral Agreement - Document storage.'}
                             {documentType === 'MSA' && 'Master Service Agreement - Major legal contract.'}
                             {documentType === 'SOW' && 'Statement of Work - Project details and deliverables.'}
+
                         </p>
                         <button
                             className="btn btn-primary"
@@ -221,6 +231,19 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                         >
                             Browse Files
                         </button>
+                    </div>
+
+                    <div style={{ marginTop: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                        <input
+                            type="checkbox"
+                            id="isFinalCheckbox"
+                            checked={isFinalized}
+                            onChange={(e) => setIsFinalized(e.target.checked)}
+                            style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+                        />
+                        <label htmlFor="isFinalCheckbox" style={{ fontWeight: 600, color: '#475569', cursor: 'pointer' }}>
+                            Mark as Final Document
+                        </label>
                     </div>
                 </div>
             )

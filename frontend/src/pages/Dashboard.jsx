@@ -53,7 +53,7 @@ function Dashboard({ user, onLogout }) {
                         d.user_id === client.id || (Array.isArray(d.shared_with) && d.shared_with.includes(client.id))
                     );
                     const pendingCount = clientDocs.filter(d => d.status === 'pending' || d.status === 'uploaded').length;
-                    const finalizedDoc = clientDocs.find(d => d.is_finalized);
+                    const finalizedDocs = clientDocs.filter(d => d.is_finalized);
 
                     sumTotalDocs += clientDocs.length;
                     sumPendingReviews += pendingCount;
@@ -62,7 +62,11 @@ function Dashboard({ user, onLogout }) {
                         ...client,
                         totalDocs: clientDocs.length,
                         pendingDocs: pendingCount,
-                        finalizedDocName: finalizedDoc ? finalizedDoc.filename : null
+                        finalizedDocs: finalizedDocs.map(d => ({
+                            id: d.id,
+                            filename: d.filename,
+                            type: d.document_type
+                        }))
                     };
                 });
 
@@ -138,65 +142,16 @@ function Dashboard({ user, onLogout }) {
                     />
                 </div>
 
-                <div className="dashboard-grid">
-                    <div className="grid-left">
-                        <div className="section-header">
-                            <h2>Recent Uploads</h2>
-                            <p>Overview of the latest document activity</p>
-                        </div>
-                        <div className="recent-uploads-card">
-                            {loading ? (
-                                <div className="loading-shimmer" />
-                            ) : recentDocs.length > 0 ? (
-                                <table className="recent-docs-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Document Name</th>
-                                            <th>Date</th>
-                                            <th>Status</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {recentDocs.map(doc => (
-                                            <tr key={doc.id} onClick={() => navigate(`/analyze/${doc.id}`)}>
-                                                <td>
-                                                    <div className="doc-name-cell">
-                                                        <span className="doc-icon">📄</span>
-                                                        <div className="doc-info">
-                                                            <div className="doc-name">{doc.filename}</div>
-                                                            <div className="doc-type">{doc.document_type}</div>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td>Recently</td>
-                                                <td>
-                                                    <span className={`status-pill ${doc.status}`}>
-                                                        {doc.status.charAt(0).toUpperCase() + doc.status.slice(1)}
-                                                    </span>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            ) : (
-                                <p className="empty-msg">No recent uploads found.</p>
-                            )}
-                        </div>
+                <div className="quick-actions-section" style={{ marginTop: '1rem', display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    <div className="section-header" style={{ margin: 0 }}>
+                        <h2 style={{ fontSize: '1.25rem' }}>Quick Actions:</h2>
                     </div>
-
-                    <div className="grid-right">
-                        <div className="section-header">
-                            <h2>Quick Actions</h2>
-                        </div>
-                        <div className="actions-card">
-                            <button className="dashboard-btn primary" onClick={() => navigate('/invite-client')}>
-                                <span>➕</span> Invite New Client
-                            </button>
-                            <button className="dashboard-btn secondary" onClick={() => navigate('/templates')}>
-                                <span>📋</span> Manage Templates
-                            </button>
-                        </div>
-                    </div>
+                    <button className="dashboard-btn primary" onClick={() => navigate('/invite-client')} style={{ width: 'auto', padding: '0.6rem 1.2rem' }}>
+                        <span>➕</span> Invite New Client
+                    </button>
+                    <button className="dashboard-btn secondary" onClick={() => navigate('/templates')} style={{ width: 'auto', padding: '0.6rem 1.2rem' }}>
+                        <span>📋</span> Manage Templates
+                    </button>
                 </div>
 
                 <div className="section-header" style={{ marginTop: '3rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>

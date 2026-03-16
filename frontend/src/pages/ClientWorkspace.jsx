@@ -28,6 +28,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
     const [shareSuccess, setShareSuccess] = useState('');
     const [shareError, setShareError] = useState('');
     const [selectedContractType, setSelectedContractType] = useState('NDA');
+    const [isFinalized, setIsFinalized] = useState(false);
     const fileInputRef = useRef(null);
 
     const loadData = async () => {
@@ -189,6 +190,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
             formData.append('file', shareFile);
             formData.append('client_id', clientId);
             formData.append('document_type', selectedContractType);
+            formData.append('is_final', isFinalized);
             if (shareMessage.trim()) formData.append('message', shareMessage.trim());
 
             const res = await fetch(`${API_URL}/api/contracts/share-with-client`, {
@@ -219,6 +221,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
         setShareMessage('');
         setShareError('');
         setShareSuccess('');
+        setIsFinalized(false);
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
@@ -386,6 +389,20 @@ const ClientWorkspace = ({ user, onLogout }) => {
                                             value={shareMessage}
                                             onChange={(e) => setShareMessage(e.target.value)}
                                         />
+                                    </div>
+
+                                    {/* Finalize Checkbox */}
+                                    <div style={{ marginTop: '1.5rem', marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+                                        <input
+                                            type="checkbox"
+                                            id="isFinalCheckboxShare"
+                                            checked={isFinalized}
+                                            onChange={(e) => setIsFinalized(e.target.checked)}
+                                            style={{ width: '20px', height: '20px', cursor: 'pointer' }}
+                                        />
+                                        <label htmlFor="isFinalCheckboxShare" style={{ fontWeight: 600, color: '#475569', cursor: 'pointer' }}>
+                                            Mark as Final Document
+                                        </label>
                                     </div>
 
                                     {/* Feedback */}
