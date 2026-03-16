@@ -42,6 +42,7 @@ CREATE TABLE documents (
     status          TEXT        NOT NULL DEFAULT 'uploaded'
                     CHECK (status IN ('pending','uploaded','approved','rejected')),
     is_finalized    BOOLEAN     NOT NULL DEFAULT FALSE,
+    client_marked_final BOOLEAN     NOT NULL DEFAULT FALSE,
     shared_with     JSONB       NOT NULL DEFAULT '[]',  -- array of user_ids or 'admin'
     uploaded_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     file_path       TEXT,
@@ -92,9 +93,17 @@ CREATE TABLE clauses (
 CREATE INDEX idx_clauses_document_id ON clauses(document_id);
 CREATE INDEX idx_clauses_clause      ON clauses(clause);
 
-
-
-
+-- =============================================================
+-- EDITED_CLAUSES
+-- Edits and comments directly on extracted clauses
+-- =============================================================
+CREATE TABLE IF NOT EXISTS edited_clauses (
+    content_id     TEXT        PRIMARY KEY,               -- CNT-XXXXXXXX
+    original_clause TEXT       NOT NULL,                  -- original textual content
+    edited_clause  TEXT,                                  -- proposed change
+    comment        TEXT,                                  -- reasoning or comment
+    updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
 -- =============================================================
 -- MESSAGES
@@ -136,7 +145,8 @@ CREATE TABLE shared_contracts (
     accepted_at     TIMESTAMPTZ,
     file_path       TEXT,
     s3_key          TEXT,
-    s3_url          TEXT
+    s3_url          TEXT,
+    is_finalized    BOOLEAN     NOT NULL DEFAULT FALSE
 );
 
 CREATE INDEX idx_shared_contracts_client_id  ON shared_contracts(client_id);

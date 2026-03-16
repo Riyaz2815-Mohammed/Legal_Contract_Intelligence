@@ -842,6 +842,7 @@ async def upload_document(
     file: UploadFile = File(...),
     document_type: str = "Others",
     shared_with: Optional[str] = None,
+    is_final: bool = Form(False),
     current_user: dict = Depends(verify_token)
 ):
     # All document types are allowed without restriction
@@ -908,7 +909,8 @@ async def upload_document(
             if temp_conn: db_pool.putconn(temp_conn)
 
     # Determine status based on document type
-    
+    is_client = current_user["role"] not in ["admin", "legal_team"]
+
     new_doc = {
         "id": doc_uuid,
         "filename": file.filename,
@@ -922,7 +924,9 @@ async def upload_document(
         "uploaded_at": datetime.now(),
         "file_path": str(file_path),
         "s3_url": s3_url,
-        "s3_key": file_name
+        "s3_key": file_name,
+        "is_finalized": is_final if not is_client else False,
+        "client_marked_final": is_final if is_client else False
     }
     
     if not db_pool:
@@ -934,10 +938,10 @@ async def upload_document(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO documents (id, filename, document_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, file_path, s3_url, s3_key)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                INSERT INTO documents (id, filename, document_type, user_id, user_email, user_role, size, status, shared_with, uploaded_at, file_path, s3_url, s3_key, is_finalized, client_marked_final)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (new_doc["id"], new_doc["filename"], new_doc["document_type"], new_doc["user_id"], new_doc["user_email"], new_doc["user_role"], new_doc["size"], new_doc["status"], json.dumps(new_doc["shared_with"]), new_doc["uploaded_at"], new_doc["file_path"], new_doc["s3_url"], new_doc["s3_key"])
+                (new_doc["id"], new_doc["filename"], new_doc["document_type"], new_doc["user_id"], new_doc["user_email"], new_doc["user_role"], new_doc["size"], new_doc["status"], json.dumps(new_doc["shared_with"]), new_doc["uploaded_at"], new_doc["file_path"], new_doc["s3_url"], new_doc["s3_key"], new_doc["is_finalized"], new_doc["client_marked_final"])
             )
         conn.commit()
     except Exception as e:
@@ -1241,14 +1245,16 @@ def download_redline(document_id: str, background_tasks: BackgroundTasks, curren
         # We will show the 'final' version (all accepted + pending) as a diff against original.
         
         final_text = accepted_edited or original
-        # Apply pending suggestions ON TOP of accepted for the DOCX preview
+        # Apply accepted and pending suggestions for robust DOCX preview
         for s in sug_map.get(cid, []):
-            if s[5] == 'pending':
+            if s[5] in ('pending', 'accepted'):
                 # s[1] is original_text, s[2] is suggested_text
                 if s[1] == final_text:
                     final_text = s[2]
                 elif s[1] in final_text:
                     final_text = final_text.replace(s[1], s[2], 1)
+                elif s[1].strip() == final_text.strip():
+                    final_text = s[2]
 
         if final_text == original:
             p.add_run(original)
@@ -1501,11 +1507,13 @@ def download_redline_docs(document_id: str, background_tasks: BackgroundTasks, c
         
         final_text = accepted_edited or original
         for s in sug_map.get(cid, []):
-            if s[5] == 'pending':
+            if s[5] in ('pending', 'accepted'):
                 if s[1] == final_text:
                     final_text = s[2]
                 elif s[1] in final_text:
                     final_text = final_text.replace(s[1], s[2], 1)
+                elif s[1].strip() == final_text.strip():
+                    final_text = s[2]
 
         if final_text == original:
             p.add_run(original)
@@ -2216,15 +2224,47 @@ def list_documents(current_user: dict = Depends(verify_token)):
     try:
         with conn.cursor() as cur:
             if current_user["role"] in ("admin", "legal_team"):
-                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with FROM documents ORDER BY uploaded_at DESC")
+                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with, is_finalized, client_marked_final FROM documents ORDER BY uploaded_at DESC")
             else:
-                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with FROM documents WHERE user_id = %s OR shared_with @> %s::jsonb ORDER BY uploaded_at DESC", (current_user["user_id"], json.dumps([current_user["user_id"]])))
+                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with, is_finalized, client_marked_final FROM documents WHERE user_id = %s OR shared_with @> %s::jsonb ORDER BY uploaded_at DESC", (current_user["user_id"], json.dumps([current_user["user_id"]])))
             rows = cur.fetchall()
-            return {"documents": [{"id": r[0], "user_id": r[1], "filename": r[2], "document_type": r[3], "status": r[4], "uploaded_at": r[5].isoformat() if r[5] else None, "s3_key": r[6], "size": r[7], "shared_with": r[8]} for r in rows]}
+            return {"documents": [{"id": r[0], "user_id": r[1], "filename": r[2], "document_type": r[3], "status": r[4], "uploaded_at": r[5].isoformat() if r[5] else None, "s3_key": r[6], "size": r[7], "shared_with": r[8], "is_finalized": r[9], "client_marked_final": r[10]} for r in rows]}
     except Exception as e:
         print(f"[ERROR] list_documents error: {e}")
         raise HTTPException(status_code=500, detail="Database error")
     finally: db_pool.putconn(conn)
+
+
+@app.post("/api/documents/finalize/{document_id}")
+def finalize_document(document_id: str, current_user: dict = Depends(verify_token)):
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    
+    conn = None
+    try:
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            # Toggle logic
+            cur.execute("UPDATE documents SET is_finalized = NOT is_finalized WHERE id = %s RETURNING is_finalized, filename, user_id", (document_id,))
+            res = cur.fetchone()
+            if not res:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            new_status, filename, doc_user_id = res
+            status_text = "Finalized" if new_status else "Un-finalized"
+            record_activity(current_user["user_id"], doc_user_id, f"{status_text} document", f"Document: {filename}")
+            
+        conn.commit()
+        return {"message": f"Document {status_text.lower()} successfully", "is_finalized": new_status}
+    except HTTPException: raise
+    except Exception as e:
+        print(f"[ERROR] Finalize error: {e}")
+        if conn: conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        if conn: db_pool.putconn(conn)
 
 
 
@@ -2303,6 +2343,7 @@ async def share_contract_with_client(
     client_id: str = Form(""), 
     message: Optional[str] = Form(None), 
     document_type: str = Form("PDF"),
+    is_final: bool = Form(False),
     current_user: dict = Depends(verify_token)
 ):
     print(f"[SHARE] Role: {current_user.get('role')} | User: {current_user.get('email')} | ClientID: {client_id}")
@@ -2322,8 +2363,8 @@ async def share_contract_with_client(
     conn = db_pool.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO shared_contracts (id, filename, shared_by, shared_by_email, client_id, message, status, shared_at, s3_key, file_path, document_type) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (contract_id, file.filename, current_user["user_id"], current_user.get("email", ""), client_id, message, 'pending_review', datetime.now(), s3_key, str(file_path), document_type))
+            cur.execute("INSERT INTO shared_contracts (id, filename, shared_by, shared_by_email, client_id, message, status, shared_at, s3_key, file_path, document_type, is_finalized) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (contract_id, file.filename, current_user["user_id"], current_user.get("email", ""), client_id, message, 'pending_review', datetime.now(), s3_key, str(file_path), document_type, is_final))
             conn.commit()
             record_activity(current_user["user_id"], client_id, "Shared contract", f"{document_type}: {file.filename}")
             return {"message": "Shared", "id": contract_id}
@@ -2335,7 +2376,7 @@ def get_contracts_from_legal(current_user: dict = Depends(verify_token)):
     try:
         with conn.cursor() as cur:
             # 1. Get explicitly shared contracts
-            cur.execute("SELECT id, filename, document_type, shared_by, shared_by_email, message, size, status, shared_at, s3_key FROM shared_contracts WHERE client_id = %s ORDER BY shared_at DESC", (current_user["user_id"],))
+            cur.execute("SELECT id, filename, document_type, shared_by, shared_by_email, message, size, status, shared_at, s3_key, is_finalized FROM shared_contracts WHERE client_id = %s ORDER BY shared_at DESC", (current_user["user_id"],))
             rows = cur.fetchall()
             contracts = []
             for r in rows:
@@ -2343,7 +2384,8 @@ def get_contracts_from_legal(current_user: dict = Depends(verify_token)):
                     "id": r[0], "filename": r[1], "document_type": r[2],
                     "shared_by": r[3], "shared_by_email": r[4], "message": r[5],
                     "size": r[6] or 0, "status": r[7], "shared_at": r[8].isoformat() if r[8] else None,
-                    "s3_key": r[9]
+                    "s3_key": r[9],
+                    "is_finalized": r[10]
                 })
 
             # Always inject the latest NDA for clients to show current status
