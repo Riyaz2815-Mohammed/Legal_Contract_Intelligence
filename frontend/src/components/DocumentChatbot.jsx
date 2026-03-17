@@ -45,10 +45,10 @@ export default function DocumentChatbot({ documentId }) {
             if (res.ok) {
                 setMessages(prev => [...prev, { role: 'assistant', text: data.response }]);
             } else {
-                setMessages(prev => [...prev, { role: 'assistant', text: `⚠️ Error: ${data.detail || 'Could not reach agent.'}` }]);
+                setMessages(prev => [...prev, { role: 'assistant', text: `Error: ${data.detail || 'Could not reach agent.'}` }]);
             }
         } catch (err) {
-            setMessages(prev => [...prev, { role: 'assistant', text: '⚠️ Connection error occurred.' }]);
+            setMessages(prev => [...prev, { role: 'assistant', text: 'Connection error occurred.' }]);
         } finally {
             setLoading(false);
         }
@@ -65,7 +65,7 @@ export default function DocumentChatbot({ documentId }) {
         <div className={`doc-chatbot-container ${isOpen ? 'open' : 'closed'}`}>
             {!isOpen ? (
                 <button className="chatbot-toggle-btn" onClick={() => setIsOpen(true)}>
-                    🤖 Ask AI Assistant
+                    Assistant
                 </button>
             ) : (
                 <div className="chatbot-window">

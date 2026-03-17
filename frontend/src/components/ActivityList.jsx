@@ -8,7 +8,6 @@ function ActivityList({ activities, loading }) {
     if (!activities || activities.length === 0) {
         return (
             <div className="activity-empty">
-                <span className="empty-icon">🕒</span>
                 <p>No recent activity found.</p>
             </div>
         );

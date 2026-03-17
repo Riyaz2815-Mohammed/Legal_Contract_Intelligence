@@ -176,7 +176,7 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
 
                         </select>
                         <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '1rem' }}>
-                            {documentType === 'NDA' && '✨ Automated extraction and classification will be performed for NDAs.'}
+                            {documentType === 'NDA' && ' Automated extraction and classification will be performed for NDAs.'}
                             {documentType === 'RA' && 'Referral Agreement - Document storage.'}
                             {documentType === 'MSA' && 'Master Service Agreement - Major legal contract.'}
                             {documentType === 'SOW' && 'Statement of Work - Project details and deliverables.'}
@@ -214,7 +214,7 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                         onDragLeave={handleDragLeave}
                         onDrop={handleDrop}
                     >
-                        <div className="upload-icon">📄</div>
+                        <div className="upload-icon"></div>
                         <h3>Drag & Drop Files Here</h3>
                         <p style={{ color: 'var(--text-muted)', margin: '1rem 0' }}>or</p>
                         <input
@@ -252,7 +252,7 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
             {
                 error && (
                     <div className="alert alert-error" style={{ marginTop: '1rem' }}>
-                        <span>⚠</span>
+                        <span></span>
                         <span>{error}</span>
                     </div>
                 )
@@ -264,7 +264,7 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
                         {files.map((fileObj, index) => (
                             <div key={index} className="file-item">
                                 <div className="file-info">
-                                    <span>📄</span>
+                                    <span></span>
                                     <div>
                                         <div style={{ fontWeight: 600 }}>{fileObj.name}</div>
                                         <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>

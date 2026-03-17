@@ -315,7 +315,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
                                     <h2>Share Contract with Client</h2>
                                     <p>Upload a contract to share directly with <strong>{client.name}</strong></p>
                                 </div>
-
+                            
                                 <div className="workspace-card share-card">
                                     {/* Contract Type Dropdown */}
                                     <div className="share-notes-section" style={{ marginBottom: '1.5rem' }}>
@@ -368,7 +368,6 @@ const ClientWorkspace = ({ user, onLogout }) => {
                                             </div>
                                         ) : (
                                             <div className="share-dropzone-placeholder">
-                                                <div className="share-upload-icon">⬆️</div>
                                                 <p className="share-drop-text">Drag & drop your file here</p>
                                                 <p className="share-drop-sub">or</p>
                                                 <button className="btn-browse" onClick={(e) => { e.stopPropagation(); fileInputRef.current?.click(); }}>
@@ -406,7 +405,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
                                     </div>
 
                                     {/* Feedback */}
-                                    {shareError && <div className="share-alert share-alert-error">⚠️ {shareError}</div>}
+                                    {shareError && <div className="share-alert share-alert-error"> {shareError}</div>}
                                     {shareSuccess && <div className="share-alert share-alert-success">{shareSuccess}</div>}
 
                                     {/* Action Buttons */}
@@ -416,7 +415,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
                                             onClick={handleSendToClient}
                                             disabled={shareLoading || !shareFile}
                                         >
-                                            {shareLoading ? 'Sending...' : '📤 Send to Client'}
+                                            {shareLoading ? 'Sending...' : ' Send to Client'}
                                         </button>
                                         <button
                                             className="btn-cancel-share"

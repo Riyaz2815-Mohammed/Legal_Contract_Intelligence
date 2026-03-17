@@ -123,7 +123,7 @@ const TemplateAnalysis = ({ user, onLogout }) => {
 
                 {clauses.length === 0 ? (
                     <div className="workspace-card" style={{ textAlign: 'center', padding: '4rem' }}>
-                        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>📄</div>
+                        <div style={{ fontSize: '3rem', marginBottom: '1rem' }}></div>
                         <h3 style={{ color: 'white' }}>No clauses detected</h3>
                         <p style={{ color: '#94a3b8' }}>
                             {status === 'processing'

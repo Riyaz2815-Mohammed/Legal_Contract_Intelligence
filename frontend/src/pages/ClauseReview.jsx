@@ -442,7 +442,7 @@ export default function ClauseReview({ user, onLogout }) {
 
                                 <div className="comparison-box">
                                     <div className="comp-pane upload-pane">
-                                        <div className="pane-title">📝 Uploaded Contract</div>
+                                        <div className="pane-title"> Uploaded Contract</div>
                                         <div className="pane-content">
                                             <div
                                                 className="text-display"
@@ -452,7 +452,7 @@ export default function ClauseReview({ user, onLogout }) {
                                     </div>
 
                                     <div className="comp-pane standard-pane">
-                                        <div className="pane-title">📜 Standard Clause</div>
+                                        <div className="pane-title"> Standard Clause</div>
                                         <div className="pane-content">
                                             {selectedClause.matched_clause ? (
                                                 <div className="matched-clause-box">
@@ -468,14 +468,14 @@ export default function ClauseReview({ user, onLogout }) {
 
                                 <div className="ai-analysis-section">
                                     <div className="ai-analysis-box">
-                                        <div className="ai-box-title">🤖 AI Analysis</div>
+                                        <div className="ai-box-title">AI Analysis</div>
                                         <div className="ai-reasoning">
                                             {llmLoading ? (
                                                 <div className="analysis-loading">
                                                     <div className="spinner-small" /> Analyzing risks...
                                                 </div>
                                             ) : (
-                                                llmAnswer || selectedClause.llm_reasoning || "No automated analysis available for this clause."
+                                                llmAnswer || selectedClause.llm_reasoning || 'Click the button below to run a detailed AI analysis of this clause, including risk factors and suggestions for improvement.'
                                             )}
                                         </div>
                                         {!llmAnswer && (
@@ -497,7 +497,7 @@ export default function ClauseReview({ user, onLogout }) {
                                         />
                                         <div className="sug-editor-actions">
                                             <button className="btn-submit-sug blue-pill" onClick={submitSuggestion} disabled={actionLoading}>
-                                                {actionLoading ? <div className="spinner-small" /> : '📬 Submit Suggestion'}
+                                                {actionLoading ? <div className="spinner-small" /> : ' Submit Suggestion'}
                                             </button>
                                             <button className="btn-cancel-sug" onClick={() => setIsSuggesting(false)}>Cancel</button>
                                         </div>
@@ -507,16 +507,16 @@ export default function ClauseReview({ user, onLogout }) {
                                 {/* Suggestions list */}
                                 {(selectedClause.suggestions || []).length > 0 && (
                                     <div className="suggestions-list-section">
-                                        <div className="suggestions-list-title">💬 Suggestions</div>
+                                        <div className="suggestions-list-title"> Suggestions</div>
                                         {(selectedClause.suggestions || []).map(sug => (
                                             <div key={sug.id} className={`suggestion-card status-${sug.status}`}>
                                                 <div className="sug-card-meta">
-                                                    <span className="sug-author">✍️ {sug.author}</span>
+                                                    <span className="sug-author"> {sug.author}</span>
                                                     <span className="sug-timestamp">
                                                         {sug.timestamp ? new Date(sug.timestamp).toLocaleString('en-GB', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) : ''}
                                                     </span>
                                                     <span className={`sug-status-pill ${sug.status}`}>
-                                                        {sug.status === 'pending' ? '⏳ Pending' : sug.status === 'accepted' ? '✓ Accepted' : '✗ Rejected'}
+                                                        {sug.status === 'pending' ? 'Pending' : sug.status === 'accepted' ? '✓ Accepted' : '✗ Rejected'}
                                                     </span>
                                                 </div>
                                                 <div
@@ -541,14 +541,14 @@ export default function ClauseReview({ user, onLogout }) {
                                 )}
 
                                 <div className="clause-comment-section">
-                                    <div className="comment-label">⚖️ Legal Note / Comment</div>
+                                    <div className="comment-label">Legal Note / Comment</div>
                                     {isCommenting ? (
                                         <div className="comment-mode-container">
                                             <textarea
                                                 className="comment-input"
                                                 value={commentValue}
                                                 onChange={e => setCommentValue(e.target.value)}
-                                                placeholder="Add a legal comment for the client..."
+                                                placeholder="Add a comment..."
                                             />
                                             <div className="edit-actions">
                                                 <button className="btn-save blue-pill" onClick={saveComment}>Save Comment</button>
@@ -560,7 +560,7 @@ export default function ClauseReview({ user, onLogout }) {
                                             {selectedClause.comment ? (
                                                 <p>{selectedClause.comment}</p>
                                             ) : (
-                                                <span className="placeholder">Click to add a legal note or comment for the client...</span>
+                                                <span className="placeholder">Click to add a note or comment for the client...</span>
                                             )}
                                         </div>
                                     )}
@@ -569,7 +569,7 @@ export default function ClauseReview({ user, onLogout }) {
                                 <div className="bottom-detail-actions">
                                     {!isSuggesting && (
                                         <button className="btn-action suggest-btn blue-pill-large" onClick={startSuggesting}>
-                                            ✏️ Suggest Edit
+                                            Suggest Edit
                                         </button>
                                     )}
                                 </div>
@@ -582,11 +582,11 @@ export default function ClauseReview({ user, onLogout }) {
                 <div className="review-footer-fixed">
                     <div className="footer-left">
                         <div className="final-actions-group">
-                            <button className="btn-footer secondary" onClick={handleDownloadRedline} disabled={actionLoading}>
-                                {actionLoading ? <span className="spinner-small" style={{ margin: '0 8px' }}/> : '📥 Download Redline'}
+                            <button className="btn-footer primary" onClick={handleDownloadRedline} disabled={actionLoading}>
+                                {actionLoading ? <span className="spinner-small" style={{ margin: '0 8px' }}/> : ' Download Redline'}
                             </button>
                             <button className="btn-footer primary" onClick={handleSendRedline} disabled={sendingRedline || actionLoading}>
-                                {sendingRedline ? 'Sending...' : '📨 Send Redline to Client'}
+                                {sendingRedline ? 'Sending...' : ' Send Redline to Client'}
                             </button>
                         </div>
                     </div>

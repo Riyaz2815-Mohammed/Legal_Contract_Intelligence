@@ -124,7 +124,7 @@ function ClientsTable({ clients, loading, onDelete, onOpenWorkspace }) {
                                                         transition: 'all 0.2s ease'
                                                     }}
                                                 >
-                                                    <span>📄</span>
+                                                    <span></span>
                                                     {doc.type === 'RA' ? 'Referral' : doc.type} Final
 
                                                 </a>
