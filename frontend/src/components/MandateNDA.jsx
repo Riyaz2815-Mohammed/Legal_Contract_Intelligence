@@ -93,7 +93,7 @@ const MandateNDA = ({ onAccepted }) => {
         <div className="mandate-overlay">
             <div className="mandate-card">
                 <div className="mandate-header">
-                    <div className="mandate-icon">⚖️</div>
+                    <div className="mandate-icon"></div>
                     <h2>Mandatory Legal Agreement</h2>
                     <p>Before proceeding to the portal, you must review and accept the Non-Disclosure Agreement updated by our legal team.</p>
                 </div>

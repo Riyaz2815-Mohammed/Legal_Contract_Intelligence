@@ -196,7 +196,7 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, o
                                         >
                                             {loadingDocs[doc.id] 
                                                 ? <span className="spinner-small" style={{ margin: '0 8px' }}/> 
-                                                : (isAdmin ? '🔍 Review' : 'View')
+                                                : (isAdmin ? ' Review' : 'View')
                                             }
                                         </button>
                                     </div>
