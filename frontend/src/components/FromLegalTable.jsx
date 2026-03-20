@@ -91,7 +91,7 @@ function FromLegalTable({ contracts, loading, onAccept, onReject }) {
                     <tr>
                         <td colSpan="6" className="fl-empty-cell">
                             <div className="fl-empty">
-                                <span className="fl-empty-icon">📂</span>
+                                <span className="fl-empty-icon"></span>
                                 <p>No contracts shared by the legal team yet.</p>
                             </div>
                         </td>

@@ -287,7 +287,7 @@ function ClientDashboard({ user, onLogout }) {
                                             </>
                                         ) : (
                                             <div className="chat-placeholder">
-                                                <div className="placeholder-icon">💬</div>
+                                                <div className="placeholder-icon"></div>
                                                 <p>Select a contact to start messaging</p>
                                             </div>
                                         )}

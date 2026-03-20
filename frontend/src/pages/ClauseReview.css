@@ -724,7 +724,7 @@ del.tc-del {
 
 .blue-pill {
     background: linear-gradient(135deg, #3b82f6, #2563eb);
-    color: white;
+    color: rgb(239, 228, 228);
 }
 
 .blue-pill:hover {
@@ -745,19 +745,19 @@ del.tc-del {
 .btn-pill-ai {
     background: #f1f5f9;
     color: #2563eb;
-    border: 1px solid #e2e8f0;
+    border: 1px solid #e1e8f1;
     box-shadow: none;
 }
 
 .btn-pill-ai:hover {
-    background: #e0e7ff;
+    background: #041652;
     color: #1e40af;
     transform: scale(1.05);
 }
 
 .btn-cancel-sug {
     background: none;
-    color: #64748b;
+    color: #afbaca;
     font-weight: 700;
     border: none;
     cursor: pointer;
@@ -765,7 +765,7 @@ del.tc-del {
 }
 
 .btn-cancel-sug:hover {
-    color: #0f172a;
+    color: #abb4ca;
 }
 
 /* Footer Actions Area */

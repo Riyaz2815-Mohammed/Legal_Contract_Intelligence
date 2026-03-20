@@ -147,10 +147,10 @@ function Dashboard({ user, onLogout }) {
                         <h2 style={{ fontSize: '1.25rem' }}>Quick Actions:</h2>
                     </div>
                     <button className="dashboard-btn primary" onClick={() => navigate('/invite-client')} style={{ width: 'auto', padding: '0.6rem 1.2rem' }}>
-                        <span>➕</span> Invite New Client
+                        <span></span> Invite New Client
                     </button>
                     <button className="dashboard-btn secondary" onClick={() => navigate('/templates')} style={{ width: 'auto', padding: '0.6rem 1.2rem' }}>
-                        <span>📋</span> Manage Templates
+                        <span></span> Manage Templates
                     </button>
                 </div>
 
