@@ -22,7 +22,7 @@ _CLAUSE_ALIASES: dict[str, list[str]] = {
 
 def search_similar_clauses(query_embedding: list, top_k: int = TOP_K, clause_type: str = None) -> list:
     """
-    Search for similar clauses in Supabase using pgvector cosine distance.
+    Search for similar clauses in Neon using pgvector cosine distance.
     Returns a list of dicts with content and metadata.
     """
     conn = None
@@ -76,7 +76,7 @@ def search_similar_clauses(query_embedding: list, top_k: int = TOP_K, clause_typ
                 })
             return results
     except Exception as e:
-        logger.error(f"Error searching Supabase: {e}")
+        logger.error(f"Error searching Neon pgvector: {e}")
         raise
     finally:
         if conn:
@@ -91,7 +91,7 @@ def query_vectorstore(query_text: str, embedding_model, clause_type: str = None,
         # Generate embedding for the query text
         query_embedding = embedding_model.embed_query(query_text)
         
-        # Search in Supabase
+        # Search in Neon pgvector
         results = search_similar_clauses(query_embedding, top_k, clause_type)
         
         # Convert to the format expected by full_pipeline (list of (Document, score))

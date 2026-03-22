@@ -8,7 +8,7 @@ from langchain_mistralai import ChatMistralAI
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
 from vector_pipeline.config.settings import MISTRAL_API_KEY, MISTRAL_MODEL, MISTRAL_TEMPERATURE
-from vector_pipeline.embeddings.embed_store import load_vectorstore, get_embedding_model
+from vector_pipeline.embeddings.embed_store import get_embedding_model
 from vector_pipeline.retrieval.query import query_vectorstore
 
 import psycopg2
@@ -27,8 +27,7 @@ def search_standard_templates(query: str, clause_type: str = None) -> str:
     If searching for a specific clause type, provide it."""
     try:
         model = get_embedding_model()
-        vs = load_vectorstore(model)
-        results = query_vectorstore(vs, query, clause_type=clause_type, document_type=None, k=3)
+        results = query_vectorstore(query, model, clause_type=clause_type, top_k=3)
         if not results:
             return "No matching standard templates found."
         

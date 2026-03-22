@@ -52,7 +52,7 @@ def fetch_legal_clauses() -> pd.DataFrame:
 
 def store_clause_embedding(conn, clause_data: dict, embedding: list):
     """
-    Insert or update a clause embedding in Supabase pgvector table.
+    Insert or update a clause embedding in the Neon pgvector table.
     """
     try:
         with conn.cursor() as cur:
@@ -103,19 +103,19 @@ def run_embed_pipeline():
         
         with conn.cursor() as cur:
             cur.execute("TRUNCATE TABLE clause_embeddings")
-            logger.info("[Embed] Wiped old embeddings in Supabase")
+            logger.info("[Embed] Wiped old embeddings in Neon pgvector")
 
         count = 0
         for _, row in df.iterrows():
             # Generate embedding
             embedding = embedding_model.embed_query(row["content"])
             
-            # Store in Supabase
+            # Store in Neon pgvector
             store_clause_embedding(conn, row.to_dict(), embedding)
             count += 1
             
         conn.commit()
-        logger.info(f"✅ Embed pipeline complete — {count} clauses stored in Supabase pgvector")
+        logger.info(f"✅ Embed pipeline complete — {count} clauses stored in Neon pgvector")
         
     except Exception as e:
         if conn:
