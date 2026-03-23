@@ -2807,7 +2807,7 @@ def suggestion_action(document_id: str, req: SuggestionAction, current_user: dic
                 cur.execute("SELECT edited_clause FROM edited_clauses WHERE content_id = %s", (cid,))
                 e_row = cur.fetchone()
                 
-                if e_row:
+                if e_row and e_row[0] is not None:
                     current_text = e_row[0]
                 else:
                     cur.execute("SELECT content FROM clauses WHERE content_id = %s", (cid,))
