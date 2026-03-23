@@ -230,12 +230,12 @@ _TITLE_RULES: list[tuple[str, list[str]]] = [
         r"\bnon.?competition\b",
         r"\brestrictive\s+covenant\b",
     ]),
-    ("Referrer’s Responsibilities", [
+    ("Referrer's Responsibilities", [
         r"\breferrer.?s\s+responsibilities\b",
         r"\breferrer\s+obligations\b",
         r"\breferral\s+partner\s+obligations\b",
     ]),
-    ("Solution Provider’s Responsibilities", [
+    ("Solution Provider's Responsibilities", [
         r"\bsolution\s+provider.?s\s+responsibilities\b",
         r"\bsolution\s+provider\s+obligations\b",
         r"\bcompany\s+obligations\b",
@@ -294,8 +294,8 @@ _BODY_RULES: dict[str, list[tuple[str, int]]] = {
     "Non-Solicitation":           [("non-solicitation", 4), ("not to solicit", 3), ("solicitation of employees", 4)],
     "Non-Compete":                [("non-compete", 4), ("non-competition", 4), ("restrictive covenant", 3)],
     "Purpose":                    [("purpose of this agreement", 4), ("scope of services", 3), ("engagement description", 3)],
-    "Referrer’s Responsibilities": [("referrer responsibilities", 4), ("obligations of referrer", 3), ("referral partner", 3)],
-    "Solution Provider’s Responsibilities": [("solution provider", 3), ("company responsibilities", 3)],
+    "Referrer's Responsibilities": [("referrer responsibilities", 4), ("obligations of referrer", 3), ("referral partner", 3)],
+    "Solution Provider's Responsibilities": [("solution provider", 3), ("company responsibilities", 3)],
     "Referral Fee":               [("referral fee", 4), ("commission", 3), ("payment of fees", 2)],
     "Joint Notification Clause":   [("joint notification", 4), ("notify jointly", 3)],
     "Visibility & Reporting Rights": [("reporting rights", 4), ("visibility", 3), ("reports", 2)],

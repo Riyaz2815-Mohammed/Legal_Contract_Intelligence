@@ -698,9 +698,9 @@ def trigger_extraction(file_name: str, document_id: str, document_type: str = "U
         try:
             if source == "legal":
                 from vector_pipeline.embeddings.embed_store import run_embed_pipeline
-                print(f"[INFO] [Background] Standard template '{file_name}' — updating Supabase pgvector...")
+                print(f"[INFO] [Background] Standard template '{file_name}' — updating Neon pgvector...")
                 run_embed_pipeline()
-                print(f"[SUCCESS] [Background] Supabase pgvector updated with new standard template clauses.")
+                print(f"[SUCCESS] [Background] Neon pgvector updated with new standard template clauses.")
             
             elif source == "client" and document_id:
                 from vector_pipeline.pipeline.full_pipeline import run_pipeline
@@ -2807,7 +2807,7 @@ def suggestion_action(document_id: str, req: SuggestionAction, current_user: dic
                 cur.execute("SELECT edited_clause FROM edited_clauses WHERE content_id = %s", (cid,))
                 e_row = cur.fetchone()
                 
-                if e_row:
+                if e_row and e_row[0] is not None:
                     current_text = e_row[0]
                 else:
                     cur.execute("SELECT content FROM clauses WHERE content_id = %s", (cid,))

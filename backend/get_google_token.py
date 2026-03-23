@@ -37,7 +37,11 @@ def main():
     print("If you see a warning about an unverified app, click 'Advanced' -> 'Go to <app name>'.\n")
     
     # Run local server to authenticate and get the token
-    creds = flow.run_local_server(port=0)
+    creds = flow.run_local_server(
+        port=0,
+        access_type='offline',
+        prompt='consent'
+    )
 
     # Convert the credentials to JSON string format
     token_json_str = creds.to_json()
