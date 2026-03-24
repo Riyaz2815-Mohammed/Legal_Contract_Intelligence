@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import Layout from '../layouts/Layout';
 import DocumentChatbot from '../components/DocumentChatbot';
+import ReactMarkdown from 'react-markdown';
 import './ClauseReview.css';
 
 const API_URL = 'http://localhost:8000';
@@ -475,7 +476,13 @@ export default function ClauseReview({ user, onLogout }) {
                                                     <div className="spinner-small" /> Analyzing risks...
                                                 </div>
                                             ) : (
-                                                llmAnswer || selectedClause.llm_reasoning || 'Click the button below to run a detailed AI analysis of this clause, including risk factors and suggestions for improvement.'
+                                                (llmAnswer || selectedClause.llm_reasoning) ? (
+                                                    <ReactMarkdown>
+                                                        {llmAnswer || selectedClause.llm_reasoning}
+                                                    </ReactMarkdown>
+                                                ) : (
+                                                    'Click the button below to run a detailed AI analysis of this clause, including risk factors and suggestions for improvement.'
+                                                )
                                             )}
                                         </div>
                                         {!llmAnswer && (

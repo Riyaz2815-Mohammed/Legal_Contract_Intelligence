@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './DocumentChatbot.css';
+import ReactMarkdown from 'react-markdown';
 
 const API_URL = 'http://localhost:8000';
 
@@ -77,7 +78,7 @@ export default function DocumentChatbot({ documentId }) {
                     <div className="chatbot-messages">
                         {messages.map((msg, idx) => (
                             <div key={idx} className={`chat-bubble ${msg.role}`}>
-                                {msg.text}
+                                <ReactMarkdown>{msg.text}</ReactMarkdown>
                             </div>
                         ))}
                         {loading && (
