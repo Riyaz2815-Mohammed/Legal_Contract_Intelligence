@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './ChatBox.css';
-
-const API_URL = 'http://localhost:8000';
+import { apiFetch } from '../utils/api';
 
 const ChatBox = ({ currentUser, recipientId }) => {
     const [messages, setMessages] = useState([]);
@@ -23,10 +22,7 @@ const ChatBox = ({ currentUser, recipientId }) => {
 
     const loadMessages = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/messages/list/${recipientId}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch('/api/messages/list/${recipientId}');
             const data = await response.json();
             if (response.ok) {
                 setMessages(data.messages);
@@ -57,17 +53,8 @@ const ChatBox = ({ currentUser, recipientId }) => {
         if (!newMessage.trim()) return;
 
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/messages/send`, {
+            const response = await apiFetch('/api/messages/send', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    recipient_id: recipientId,
-                    content: newMessage
-                })
             });
 
             if (response.ok) {

@@ -1,7 +1,6 @@
 import './ClientsTable.css';
 import StatusBadge from './StatusBadge';
-const API_URL = 'http://localhost:8000';
-
+import { apiFetch } from '../utils/api';
 
 function ClientsTable({ clients, loading, onDelete, onOpenWorkspace }) {
     if (loading) {
@@ -81,27 +80,21 @@ function ClientsTable({ clients, loading, onDelete, onOpenWorkspace }) {
                                 {client.finalizedDocs && client.finalizedDocs.length > 0 ? (
                                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
                                         {client.finalizedDocs.map((doc) => {
-                                            const token = localStorage.getItem('token');
-                                            const downloadUrl = `${API_URL}/api/documents/download/${doc.id}`;
-                                            
-                                            // Handle click to download via direct S3 URL fetch
-                                            const handleClick = async (e) => {
-                                                e.preventDefault();
-                                                try {
-                                                    const res = await fetch(downloadUrl, {
-                                                        headers: { 'Authorization': `Bearer ${token}` }
-                                                    });
-                                                    const data = await res.json();
-                                                    if (data.download_url) {
-                                                        window.open(data.download_url, '_blank');
-                                                    } else {
-                                                        alert('Download failed');
-                                                    }
-                                                } catch (err) {
-                                                    console.error('Download error:', err);
-                                                    alert('Download error');
-                                                }
-                                            };
+                            const handleClick = async (e) => {
+                                e.preventDefault();
+                                try {
+                                    const res = await apiFetch(`/api/documents/download/${doc.id}`);
+                                    const data = await res.json();
+                                    if (data.download_url) {
+                                        window.open(data.download_url, '_blank');
+                                    } else {
+                                        alert('Download failed');
+                                    }
+                                } catch (err) {
+                                    console.error('Download error:', err);
+                                    alert('Download error');
+                                }
+                            };
 
                                             return (
                                                 <a

@@ -4,8 +4,7 @@ import Layout from '../layouts/Layout';
 import DocumentChatbot from '../components/DocumentChatbot';
 import ReactMarkdown from 'react-markdown';
 import './ClauseReview.css';
-
-const API_URL = 'http://localhost:8000';
+import { apiFetch } from '../utils/api';
 
 /* ── Colour helpers ──────────────────────────────────────────── */
 const CLAUSE_COLORS = {
@@ -96,10 +95,7 @@ export default function ClauseReview({ user, onLogout }) {
 
     const fetchReview = useCallback(async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/review/${documentId}`, {
-                headers: { 'Authorization': `Bearer ${token}` },
-            });
+            const res = await apiFetch('/api/documents/review/${documentId}');
             const result = await res.json();
             if (res.ok) {
                 setData(result);
@@ -202,10 +198,8 @@ export default function ClauseReview({ user, onLogout }) {
         if (!selectedClause) return;
         setActionLoading(true);
         try {
-            const token = localStorage.getItem('token');
-            await fetch(`${API_URL}/api/documents/review/${documentId}/action`, {
+            await apiFetch('/api/documents/review/${documentId}/action', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content_id: selectedClause.content_id, action: actionStr }),
             });
             await fetchReview();
@@ -221,16 +215,9 @@ export default function ClauseReview({ user, onLogout }) {
         if (!selectedClause || !suggestionDraft.trim()) return;
         setActionLoading(true);
         try {
-            const token = localStorage.getItem('token');
             const original = selectedClause.edited_content || selectedClause.content;
-            await fetch(`${API_URL}/api/documents/review/${documentId}/suggest`, {
+            await apiFetch('/api/documents/review/${documentId}/suggest', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    content_id: selectedClause.content_id,
-                    original_text: original,
-                    suggested_text: suggestionDraft,
-                }),
             });
             setSuggestionDraft('');
             setIsSuggesting(false);
@@ -246,10 +233,8 @@ export default function ClauseReview({ user, onLogout }) {
     const handleSuggestionAction = async (sugId, action) => {
         setSugActionLoading(prev => ({ ...prev, [sugId]: true }));
         try {
-            const token = localStorage.getItem('token');
-            await fetch(`${API_URL}/api/documents/review/${documentId}/suggestion-action`, {
+            await apiFetch('/api/documents/review/${documentId}/suggestion-action', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ suggestion_id: sugId, action }),
             });
             await fetchReview();
@@ -265,10 +250,8 @@ export default function ClauseReview({ user, onLogout }) {
         if (!selectedClause) return;
         setActionLoading(true);
         try {
-            const token = localStorage.getItem('token');
-            await fetch(`${API_URL}/api/documents/review/${documentId}/comment`, {
+            await apiFetch('/api/documents/review/${documentId}/comment', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
                 body: JSON.stringify({ content_id: selectedClause.content_id, comment: commentValue }),
             });
             await fetchReview();
@@ -285,14 +268,8 @@ export default function ClauseReview({ user, onLogout }) {
         setLlmLoading(true);
         setLlmAnswer('');
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/review/${documentId}/ask-llm`, {
+            const res = await apiFetch('/api/documents/review/${documentId}/ask-llm', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    content_id: selectedClause.content_id,
-                    question: 'Please analyze the risks and key differences of this client clause compared to a standard template, and suggest how it could be made more favorable.'
-                }),
             });
             const d = await res.json();
             setLlmAnswer(d.answer || d.detail || 'No response');
@@ -306,10 +283,8 @@ export default function ClauseReview({ user, onLogout }) {
     const handleDownloadRedline = async () => {
         setActionLoading(true);
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/download-redline-docs/${documentId}`, {
+            const res = await apiFetch('/api/documents/download-redline-docs/${documentId}', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (!res.ok) {
                 const text = await res.text();
@@ -333,10 +308,8 @@ export default function ClauseReview({ user, onLogout }) {
         setSendingRedline(true);
         setRedlineMsg('');
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/send-redline/${documentId}`, {
+            const res = await apiFetch('/api/documents/send-redline/${documentId}', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` },
             });
             const d = await res.json();
             if (res.ok) {

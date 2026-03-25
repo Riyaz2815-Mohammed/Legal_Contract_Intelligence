@@ -11,8 +11,7 @@ import ActivityList from '../components/ActivityList';
 import MandateNDA from '../components/MandateNDA';
 import './Dashboard.css';
 import './ClientWorkspace.css';
-
-const API_URL = 'http://localhost:8000';
+import { apiFetch } from '../utils/api';
 
 function ClientDashboard({ user, onLogout }) {
     const [documents, setDocuments] = useState([]);
@@ -30,10 +29,7 @@ function ClientDashboard({ user, onLogout }) {
 
     const loadDocuments = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/documents/list`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch('/api/documents/list');
             const data = await response.json();
             if (response.ok) {
                 setDocuments(data.documents);
@@ -47,10 +43,7 @@ function ClientDashboard({ user, onLogout }) {
 
     const loadLegalTeam = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/legal/list`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch('/api/legal/list');
             const data = await response.json();
             if (response.ok) {
                 setLegalTeam(data.members || []);
@@ -66,10 +59,7 @@ function ClientDashboard({ user, onLogout }) {
     const loadSharedContracts = async () => {
         setSharedLoading(true);
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/contracts/from-legal`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch('/api/contracts/from-legal');
             const data = await response.json();
             if (response.ok) {
                 setSharedContracts(data.contracts || []);
@@ -84,10 +74,7 @@ function ClientDashboard({ user, onLogout }) {
     const loadActivities = async () => {
         setActivitiesLoading(true);
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/activity/list`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch('/api/activity/list');
             const data = await response.json();
             if (response.ok) {
                 setActivities(data.activities || []);
@@ -131,17 +118,13 @@ function ClientDashboard({ user, onLogout }) {
 
     const handleAcceptContract = async (contractId, isMandate = false) => {
         try {
-            const token = localStorage.getItem('token');
             const endpoint = isMandate ? `/api/contracts/accept-mandate` : `/api/contracts/accept/${contractId}`;
-            const res = await fetch(`${API_URL}${endpoint}`, {
+            const res = await apiFetch(endpoint, {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
                 if (isMandate) {
-                    const userData = { ...currentUser, nda_accepted: true };
-                    localStorage.setItem('user', JSON.stringify(userData));
-                    setCurrentUser(userData);
+                    setCurrentUser(prev => ({ ...prev, nda_accepted: true }));
                     setActiveTab('documents');
                 }
                 loadSharedContracts();
@@ -154,11 +137,9 @@ function ClientDashboard({ user, onLogout }) {
 
     const handleRejectContract = async (contractId, isMandate = false) => {
         try {
-            const token = localStorage.getItem('token');
             const endpoint = isMandate ? `/api/contracts/reject-mandate` : `/api/contracts/reject/${contractId}`;
-            const res = await fetch(`${API_URL}${endpoint}`, {
+            const res = await apiFetch(endpoint, {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
                 loadSharedContracts();

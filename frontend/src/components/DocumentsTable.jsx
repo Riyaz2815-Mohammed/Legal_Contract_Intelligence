@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './DocumentsTable.css';
-
-const API_URL = 'http://localhost:8000';
+import { apiFetch } from '../utils/api';
 
 function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, onFinalize, currentUser, hideActions = false }) {
     const navigate = useNavigate();
@@ -43,10 +42,7 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, o
             return;
         }
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/download/${docId}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await apiFetch('/api/documents/download/${docId}');
             const data = await res.json();
             if (data.download_url) {
                 window.open(data.download_url, '_blank');
@@ -65,10 +61,8 @@ function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, o
         if (doc.document_type?.includes('Redlined')) {
             setLoadingDocs(prev => ({ ...prev, [doc.id]: true }));
             try {
-                const token = localStorage.getItem('token');
-                const res = await fetch(`${API_URL}/api/documents/google-doc/${doc.id}`, {
+                const res = await apiFetch('/api/documents/google-doc/${doc.id}', {
                     method: 'POST',
-                    headers: { 'Authorization': `Bearer ${token}` }
                 });
                 if (!res.ok) throw new Error('Failed to open Google Docs');
                 const data = await res.json();
