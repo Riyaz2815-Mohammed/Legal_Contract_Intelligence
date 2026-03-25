@@ -5,7 +5,7 @@ import DocumentsTable from '../components/DocumentsTable';
 import Modal from '../components/Modal';
 import './Dashboard.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 function Upload({ user, onLogout }) {
     const [documents, setDocuments] = useState([]);

@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom';
 import Layout from '../layouts/Layout';
 import './DocumentAnalysis.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 const TemplateAnalysis = ({ user, onLogout }) => {
     const { templateId } = useParams();

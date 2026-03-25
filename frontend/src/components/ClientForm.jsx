@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Modal from './Modal';
 import './ClientForm.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 function ClientForm({ onClientCreated }) {
     const [name, setName] = useState('');

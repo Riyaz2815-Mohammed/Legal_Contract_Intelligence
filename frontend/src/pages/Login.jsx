@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import './Login.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 function Login({ onLogin }) {
     const [email, setEmail] = useState('');

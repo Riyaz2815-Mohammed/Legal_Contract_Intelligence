@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import './ChatBox.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 const ChatBox = ({ currentUser, recipientId }) => {
     const [messages, setMessages] = useState([]);

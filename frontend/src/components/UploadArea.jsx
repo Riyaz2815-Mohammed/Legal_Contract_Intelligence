@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import './UploadArea.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
     const [files, setFiles] = useState([]);

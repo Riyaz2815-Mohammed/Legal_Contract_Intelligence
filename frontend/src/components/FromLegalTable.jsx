@@ -1,6 +1,6 @@
 import './FromLegalTable.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 function FromLegalTable({ contracts, loading, onAccept, onReject }) {
     const formatFileSize = (bytes) => {

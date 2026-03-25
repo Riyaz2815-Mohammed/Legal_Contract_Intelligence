@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './DocumentsTable.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 function DocumentsTable({ documents, loading, onApprove, onReject, onDownload, onFinalize, currentUser, hideActions = false }) {
     const navigate = useNavigate();

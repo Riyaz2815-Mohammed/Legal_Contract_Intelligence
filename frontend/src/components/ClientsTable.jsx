@@ -1,6 +1,6 @@
 import './ClientsTable.css';
 import StatusBadge from './StatusBadge';
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 
 function ClientsTable({ clients, loading, onDelete, onOpenWorkspace }) {

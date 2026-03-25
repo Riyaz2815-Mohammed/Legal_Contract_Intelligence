@@ -12,7 +12,7 @@ import MandateNDA from '../components/MandateNDA';
 import './Dashboard.css';
 import './ClientWorkspace.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 function ClientDashboard({ user, onLogout }) {
     const [documents, setDocuments] = useState([]);

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import './MandateNDA.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 const MandateNDA = ({ onAccepted }) => {
     const [template, setTemplate] = useState(null);

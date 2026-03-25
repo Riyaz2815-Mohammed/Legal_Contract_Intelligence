@@ -5,7 +5,7 @@ import LegalTeamTable from '../components/LegalTeamTable';
 import Modal from '../components/Modal';
 import './Dashboard.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 function LegalTeam({ user, onLogout }) {
     const [members, setMembers] = useState([]);

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Modal from './Modal';
 import './LegalTeamForm.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 function LegalTeamForm({ onMemberCreated }) {
     const [name, setName] = useState('');

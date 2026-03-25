@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import Layout from '../layouts/Layout';
 import './TemplatesPage.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 const TemplatesPage = ({ user, onLogout }) => {
     const [templates, setTemplates] = useState([]);

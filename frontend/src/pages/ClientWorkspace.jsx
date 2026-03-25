@@ -8,7 +8,7 @@ import StatusBadge from '../components/StatusBadge';
 import ActivityList from '../components/ActivityList';
 import './ClientWorkspace.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 const ClientWorkspace = ({ user, onLogout }) => {
     const { clientId } = useParams();

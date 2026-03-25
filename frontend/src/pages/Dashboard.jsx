@@ -6,7 +6,7 @@ import StatsCard from '../components/StatsCard';
 import ClientDashboard from './ClientDashboard';
 import './Dashboard.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 function Dashboard({ user, onLogout }) {
     const navigate = useNavigate();

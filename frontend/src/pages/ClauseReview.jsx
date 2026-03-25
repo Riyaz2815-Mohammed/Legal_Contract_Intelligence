@@ -5,7 +5,7 @@ import DocumentChatbot from '../components/DocumentChatbot';
 import ReactMarkdown from 'react-markdown';
 import './ClauseReview.css';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 /* ── Colour helpers ──────────────────────────────────────────── */
 const CLAUSE_COLORS = {

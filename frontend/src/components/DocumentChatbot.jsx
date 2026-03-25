@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import './DocumentChatbot.css';
 import ReactMarkdown from 'react-markdown';
 
-const API_URL = 'http://localhost:8000';
+import { API_URL } from '../config';
 
 export default function DocumentChatbot({ documentId }) {
     const [isOpen, setIsOpen] = useState(false);
