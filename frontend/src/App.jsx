@@ -10,30 +10,48 @@ import TemplatesPage from './pages/TemplatesPage';
 import DocumentAnalysis from './pages/DocumentAnalysis';
 import TemplateAnalysis from './pages/TemplateAnalysis';
 import ClauseReview from './pages/ClauseReview';
+import { apiFetch } from './utils/api';
 import './App.css';
 
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [user, setUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true); // true until /auth/me resolves
 
+  // Bootstrap: ask the backend who is currently logged in (via SSO cookie or local JWT)
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    const userData = localStorage.getItem('user');
-    if (token && userData) {
-      setIsAuthenticated(true);
-      setUser(JSON.parse(userData));
-    }
+    const checkSession = async () => {
+      try {
+        const res = await apiFetch('/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          setIsAuthenticated(true);
+          setUser(data.user);
+        } else {
+          // 401 / 403 — not logged in
+          setIsAuthenticated(false);
+          setUser(null);
+        }
+      } catch {
+        // network error — treat as not authenticated
+        setIsAuthenticated(false);
+        setUser(null);
+      } finally {
+        setAuthLoading(false);
+      }
+    };
+    checkSession();
   }, []);
 
-  const handleLogin = (token, userData) => {
-    localStorage.setItem('token', token);
-    localStorage.setItem('user', JSON.stringify(userData));
+  // Called after a successful local login — userData comes from the login response
+  const handleLogin = (userData) => {
     setIsAuthenticated(true);
     setUser(userData);
   };
 
   const handleLogout = () => {
+    // Clear any legacy localStorage items that may still exist
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     setIsAuthenticated(false);
@@ -44,9 +62,15 @@ function App() {
     <Router>
       <div className="app">
         <div className="bg-animation"></div>
-        <Routes>
-          <Route
-            path="/login"
+        {/* Don't render routes until we know auth state */}
+        {authLoading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
+            <span style={{ color: '#a5b4fc', fontSize: '1rem' }}>Loading…</span>
+          </div>
+        ) : (
+          <Routes>
+            <Route
+              path="/login"
             element={
               isAuthenticated ?
                 <Navigate to="/dashboard" /> :
@@ -126,8 +150,8 @@ function App() {
             }
           />
           <Route path="/" element={<Navigate to="/login" />} />
-
-        </Routes>
+          </Routes>
+        )}
       </div>
     </Router>
   );

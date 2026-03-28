@@ -1,8 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import './DocumentChatbot.css';
 import ReactMarkdown from 'react-markdown';
-
-import { API_URL } from '../config';
+import { apiFetch } from '../utils/api';
 
 export default function DocumentChatbot({ documentId }) {
     const [isOpen, setIsOpen] = useState(false);
@@ -32,13 +31,8 @@ export default function DocumentChatbot({ documentId }) {
         setLoading(true);
 
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/chat/${documentId}`, {
+            const res = await apiFetch('/api/documents/chat/${documentId}', {
                 method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${token}`,
-                    'Content-Type': 'application/json',
-                },
                 body: JSON.stringify({ message: userMsg }),
             });
             const data = await res.json();

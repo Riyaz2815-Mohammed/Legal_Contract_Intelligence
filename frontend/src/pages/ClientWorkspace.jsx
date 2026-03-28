@@ -7,8 +7,7 @@ import DocumentsTable from '../components/DocumentsTable';
 import StatusBadge from '../components/StatusBadge';
 import ActivityList from '../components/ActivityList';
 import './ClientWorkspace.css';
-
-import { API_URL } from '../config';
+import { apiFetch } from '../utils/api';
 
 const ClientWorkspace = ({ user, onLogout }) => {
     const { clientId } = useParams();
@@ -33,14 +32,9 @@ const ClientWorkspace = ({ user, onLogout }) => {
 
     const loadData = async () => {
         try {
-            const token = localStorage.getItem('token');
             const [clientsRes, docsRes] = await Promise.all([
-                fetch(`${API_URL}/api/clients/list`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                }),
-                fetch(`${API_URL}/api/documents/list`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                })
+                apiFetch('/api/clients/list');
+                apiFetch('/api/documents/list');
             ]);
 
             const clientsData = await clientsRes.json();
@@ -65,10 +59,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
     const loadActivities = async () => {
         setActivitiesLoading(true);
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/activity/list?client_id=${clientId}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await apiFetch('/api/activity/list?client_id=${clientId}');
             const data = await res.json();
             if (res.ok) setActivities(data.activities);
         } catch (err) {
@@ -85,10 +76,8 @@ const ClientWorkspace = ({ user, onLogout }) => {
 
     const handleApprove = async (docId) => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/approve/${docId}`, {
+            const res = await apiFetch('/api/documents/approve/${docId}', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
                 loadData();
@@ -102,10 +91,8 @@ const ClientWorkspace = ({ user, onLogout }) => {
 
     const handleReject = async (docId) => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/reject/${docId}`, {
+            const res = await apiFetch('/api/documents/reject/${docId}', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
                 loadData();
@@ -119,10 +106,8 @@ const ClientWorkspace = ({ user, onLogout }) => {
 
     const handleFinalize = async (docId) => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/finalize/${docId}`, {
+            const res = await apiFetch('/api/documents/finalize/${docId}', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (res.ok) {
                 loadData();
@@ -136,10 +121,7 @@ const ClientWorkspace = ({ user, onLogout }) => {
 
     const handleDownload = async (docId) => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/documents/download/${docId}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await apiFetch('/api/documents/download/${docId}');
             const data = await res.json();
             if (data.download_url) {
                 window.open(data.download_url, '_blank');
@@ -185,7 +167,6 @@ const ClientWorkspace = ({ user, onLogout }) => {
         setShareSuccess('');
 
         try {
-            const token = localStorage.getItem('token');
             const formData = new FormData();
             formData.append('file', shareFile);
             formData.append('client_id', clientId);
@@ -193,10 +174,10 @@ const ClientWorkspace = ({ user, onLogout }) => {
             formData.append('is_final', isFinalized);
             if (shareMessage.trim()) formData.append('message', shareMessage.trim());
 
-            const res = await fetch(`${API_URL}/api/contracts/share-with-client`, {
+            const res = await apiFetch('/api/contracts/share-with-client', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` },
-                body: formData
+                headers: {},
+                body: formData,
             });
             const data = await res.json();
             if (res.ok) {

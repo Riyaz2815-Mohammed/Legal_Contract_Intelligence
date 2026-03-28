@@ -1,7 +1,6 @@
 import { useState } from 'react';
+import { apiFetch } from '../utils/api';
 import './Login.css';
-
-import { API_URL } from '../config';
 
 function Login({ onLogin }) {
     const [email, setEmail] = useState('');
@@ -15,10 +14,9 @@ function Login({ onLogin }) {
         setAlert(null);
 
         try {
-            const response = await fetch(`${API_URL}/api/auth/login`, {
+            const response = await apiFetch('/api/auth/login', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ email, password })
+                body: JSON.stringify({ email, password }),
             });
 
             const data = await response.json();
@@ -26,8 +24,10 @@ function Login({ onLogin }) {
             if (response.ok) {
                 setAlert({ type: 'success', message: 'Signed in successfully. Welcome back!' });
                 setTimeout(() => {
-                    onLogin(data.token, data.user);
+                    onLogin(data.user);
                 }, 800);
+            } else if (response.status === 403) {
+                setAlert({ type: 'error', message: 'Local login is disabled. Please sign in via the central portal.' });
             } else {
                 setAlert({ type: 'error', message: data.detail || 'Invalid credentials' });
             }
@@ -48,6 +48,9 @@ function Login({ onLogin }) {
                 </div>
 
                 <div className="login-card">
+                    <p style={{ textAlign: 'center', fontSize: '0.75rem', color: '#94a3b8', marginBottom: '0.75rem' }}>
+                        Local dev login — use the central portal in production
+                    </p>
                     <form onSubmit={handleSubmit}>
                         <div className="form-group">
                             <label htmlFor="email">Email Address</label>

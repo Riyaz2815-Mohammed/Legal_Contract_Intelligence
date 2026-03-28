@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import Modal from './Modal';
 import './LegalTeamForm.css';
-
-import { API_URL } from '../config';
+import { apiFetch } from '../utils/api';
 
 function LegalTeamForm({ onMemberCreated }) {
     const [name, setName] = useState('');
@@ -17,14 +16,9 @@ function LegalTeamForm({ onMemberCreated }) {
         setAlert(null);
 
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/legal/create`, {
+            const response = await apiFetch('/api/legal/create', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ name, email })
+                body: JSON.stringify({ name, email }),
             });
 
             const data = await response.json();

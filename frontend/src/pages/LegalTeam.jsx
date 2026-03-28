@@ -4,8 +4,7 @@ import LegalTeamForm from '../components/LegalTeamForm';
 import LegalTeamTable from '../components/LegalTeamTable';
 import Modal from '../components/Modal';
 import './Dashboard.css';
-
-import { API_URL } from '../config';
+import { apiFetch } from '../utils/api';
 
 function LegalTeam({ user, onLogout }) {
     const [members, setMembers] = useState([]);
@@ -14,10 +13,7 @@ function LegalTeam({ user, onLogout }) {
 
     const loadMembers = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/legal/list`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch('/api/legal/list');
 
             const data = await response.json();
             if (response.ok) {
@@ -43,10 +39,8 @@ function LegalTeam({ user, onLogout }) {
         if (!window.confirm(`Are you sure you want to delete ${member.name}?`)) return;
 
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/legal/delete/${member.id}`, {
+            const response = await apiFetch('/api/legal/delete/${member.id}', {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
             });
 
             if (response.ok) {

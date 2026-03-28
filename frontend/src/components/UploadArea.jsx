@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import './UploadArea.css';
-
-import { API_URL } from '../config';
+import { apiFetch } from '../utils/api';
 
 function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
     const [files, setFiles] = useState([]);
@@ -65,7 +64,6 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
         formData.append('file', fileObj.file);
 
         try {
-            const token = localStorage.getItem('token');
 
             // Simulate progress
             const progressInterval = setInterval(() => {
@@ -79,19 +77,15 @@ function UploadArea({ onUploadComplete, documentType: externalDocumentType }) {
             }, 100);
 
             // If NDA is chosen, backend will trigger extraction automatically
-            const response = await fetch(
-                `${API_URL}/api/documents/upload?document_type=${fileObj.documentType}`,
+            const fd = new FormData();
+            fd.append('file', fileObj.file);
+            fd.append('is_final', isFinalized);
+            const response = await apiFetch(
+                `/api/documents/upload?document_type=${fileObj.documentType}`,
                 {
                     method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`
-                    },
-                    body: (function () {
-                        const fd = new FormData();
-                        fd.append('file', fileObj.file);
-                        fd.append('is_final', isFinalized);
-                        return fd;
-                    })()
+                    headers: {},  // let browser set multipart boundary
+                    body: fd,
                 }
             );
 

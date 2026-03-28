@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import './MandateNDA.css';
-
-import { API_URL } from '../config';
+import { apiFetch } from '../utils/api';
 
 const MandateNDA = ({ onAccepted }) => {
     const [template, setTemplate] = useState(null);
@@ -12,10 +11,7 @@ const MandateNDA = ({ onAccepted }) => {
     useEffect(() => {
         const fetchLatestNDA = async () => {
             try {
-                const token = localStorage.getItem('token');
-                const response = await fetch(`${API_URL}/api/templates/latest-nda`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
+                const response = await apiFetch('/api/templates/latest-nda');
                 const data = await response.json();
                 if (response.ok) {
                     setTemplate(data);
@@ -36,10 +32,8 @@ const MandateNDA = ({ onAccepted }) => {
     const handleAccept = async () => {
         setAccepting(true);
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/contracts/accept-mandate`, {
+            const response = await apiFetch('/api/contracts/accept-mandate', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) {
                 // Update local storage user data
@@ -61,10 +55,7 @@ const MandateNDA = ({ onAccepted }) => {
     const handleView = async () => {
         if (!template) return;
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/templates/download/${template.id}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await apiFetch('/api/templates/download/${template.id}');
             const data = await res.json();
             if (data.download_url) {
                 window.open(data.download_url, '_blank');
