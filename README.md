@@ -1,196 +1,195 @@
 # LACCIS - Legal Clause Classification Intelligence System
 
-A modern web application for legal document management with intelligent clause classification.
+## Project Description
+LACCIS is a modern, responsive web application designed for legal document management with intelligent clause classification. It allows legal teams to seamlessly manage clients, who can upload and evaluate their contracts against standard templates. The system leverages AI tools to extract text, classify clauses, assess risk, and perform semantic similarity checks against standard baseline documents.
 
-## 🎯 Features
-
-- 🔐 **Secure Authentication** - JWT-based authentication for legal teams and clients
-- 📧 **SMTP Email Integration** - Automatically send login credentials to clients via Gmail
-- 📄 **Document Upload** - Drag-and-drop interface for contract documents
-- 👥 **Client Management** - Legal team dashboard for managing client access
-- 🎨 **Beautiful UI** - Modern React app with glassmorphism design and smooth animations
-- 📱 **Responsive** - Works seamlessly on all devices
-
-## 📁 Project Structure
-
-```
-LACCIS/
-├── frontend/              # React + Vite application
-│   ├── src/
-│   │   ├── components/   # Reusable React components
-│   │   ├── pages/        # Page components (Login, Dashboard, Upload)
-│   │   ├── App.jsx       # Main app with routing
-│   │   └── main.jsx      # Entry point
-│   └── package.json
-├── backend/              # FastAPI backend
-│   ├── main.py          # API server
-│   └── requirements.txt
-    └── extracted_texts/ # Auto-created directory for transient text extractions from PDFs
-```
-
-## 🚀 Quick Start
+## How to Run the Project (Installation & Setup)
 
 ### Prerequisites
 - Node.js v18+ 
 - Python 3.8+
+- Neon DB (PostgreSQL database with `pgvector` extension)
 
 ### Backend Setup
-
-1. **Install Python dependencies:**
-```bash
-cd backend
-pip install -r requirements.txt
-```
-
-2. **Environment Configuration** Create a `.env` file in the backend matching the `.env.ex` structure. Provide database connectivity, AWS S3 keys, and your EmailJS configuration.
-
-3. **Run the FastAPI server:**
-```bash
-uvicorn main:app --reload
-```
-
-The API will be available at `http://localhost:8000`
+1. **Navigate to the backend directory:**
+   ```bash
+   cd backend
+   ```
+2. **Create a virtual environment (optional but recommended):**
+   ```bash
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows use: .venv\Scripts\activate
+   ```
+3. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+4. **Environment Configuration:**
+   Create a `.env` file in the `backend` directory (refer to the Environment Variables section below).
+5. **Start the FastAPI server:**
+   ```bash
+   python main.py
+   ```
+   The API will be available at `http://localhost:8000`
 
 ### Frontend Setup
+1. **Navigate to the frontend directory:**
+   ```bash
+   cd frontend
+   ```
+2. **Install dependencies:**
+   ```bash
+   npm install
+   ```
+3. **Start the development server:**
+   ```bash
+   npm run dev
+   ```
+   The app will be available at `http://localhost:5173`
 
-1. **Install dependencies:**
-```bash
-cd frontend
-npm install
-```
-
-2. **Start development server:**
-```bash
-npm run dev
-```
-
-The app will be available at `http://localhost:5173`
-
-## 🔑 Default Credentials
-
-**Admin Account:**
-- Email: `admin@laccis.com`
-- Password: `admin123`
-
-## 📖 Usage
-
-### For Legal Team (Admin)
-
-1. Login with admin credentials
-2. Navigate to the dashboard
-3. Add new clients by entering their name and email
-4. System automatically generates credentials and sends them via email
-5. View all clients and uploaded documents statistics
-6. Review client-uploaded agreements against **Standard Templates** (which the legal team provisions) using the AI clause extraction and risk assessment pipeline.
-
-### For Clients
-
-1. Receive login credentials via email
-2. Login with provided credentials
-3. Upload contract documents using drag-and-drop
-4. View all uploaded documents and safely share fully reviewed documents back.
-
-## 🛠️ Technology Stack
+## Technology Stack
 
 **Frontend:**
-- React 19 - UI library
-- Vite 7 - Build tool and dev server
-- React Router - Client-side routing
-- CSS3 - Modern styling with glassmorphism
+- React 19 (Hooks, React-DOM, React Router DOM, React Markdown)
+- Vite 7
+- Modern CSS (Glassmorphism design layout)
 
 **Backend:**
-- FastAPI - Modern Python web framework
-- PostgreSQL - Robust relational database for users, documents, and derived clauses
-- AWS S3 - Secure object storage for the actual PDF/Word documents
-- ChromaDB - Vector database for SBERT-based semantic similarity checking of clauses
-- Mistral AI & Langchain - For complex text extraction, OCR, and document summarization
-- PyJWT - Secure Authentication
+- FastAPI (Python web framework)
+- Neon DB (Serverless Postgres with pgvector for Relational & Vector storage)
+- AWS S3 (Document object storage)
+- PyJWT (Authentication)
+- Sentence-Transformers & Mistral AI & Langchain (AI, NLP, OCR, Text Extraction, AI Chat, Summarization)
 
-## 📡 API Endpoints
-
-- `POST /api/auth/login` - User authentication
-- `POST /api/clients/create` - Create new client (admin only)
-- `GET /api/clients/list` - List all clients (admin only)
-- `POST /api/documents/upload` - Upload document directly to S3 and trigger NLP Extraction
-- `GET /api/documents/list` - List documents available to the requesting user
-- `GET /api/documents/stats` - Document statistics (admin only)
-- `GET /api/documents/review/{doc_id}` - Fetch AI clause-by-clause review for a document
-
-## ⚙️ Configuration (.env)
-
-Make sure you configure your backend `.env` file correctly with these exact keys:
-
+## Environment Variables (`.env`)
+Create a `.env` file in the `backend` directory strictly with these variable names:
 ```ini
-DATABASE_URL=postgresql://user:password@host:port/dbname
-JWT_SECRET_KEY=your_secure_random_string
-AWS_ACCESS_KEY="aws_key"
-AWS_SECRET_KEY="aws_secret"
-REGION="aws_region"
-BUCKET_NAME="aws_s3_bucket"
-MISTRAL_API_KEY="mistral_key"
+# Database
+DATABASE_URL= # Neon DB connection string
 
-# EmailJS settings
-EMAILJS_SERVICE_ID=your_service
-EMAILJS_TEMPLATE_ID=your_template
-EMAILJS_PUBLIC_KEY=your_pub
-EMAILJS_PRIVATE_KEY=your_priv
+# EmailJS Configuration
+EMAILJS_SERVICE_ID=
+EMAILJS_TEMPLATE_ID=
+EMAILJS_PUBLIC_KEY=
+EMAILJS_PRIVATE_KEY=
+
+# Authentication
+JWT_SECRET=
+ADMIN_PASSWORD=
+
+# AWS S3 Storage
+AWS_ACCESS_KEY=
+AWS_SECRET_KEY=
+REGION=
+BUCKET_NAME=
+
+# AI Settings
+MODEL_NAME=
+SIMILARITY_HIGH=
+SIMILARITY_MEDIUM=
+MISTRAL_API=
+
+# Google Drive Integration
+GOOGLE_DRIVE_FOLDER_ID=
+GOOGLE_CLIENT_SECRET_JSON=
+GOOGLE_OAUTH_TOKEN_JSON=
 ```
 
-## 🚀 Production Build
+## API Endpoints
 
-### Frontend:
-```bash
-cd frontend
-npm run build
-```
+### Authentication & Users
+- `POST /api/auth/login` - User authentication (Admin and Clients)
+- `POST /api/clients/create` - Create new client and auto-email credentials
+- `GET /api/clients/list` - List all configured clients
+- `DELETE /api/clients/delete/{client_id}` - Delete a specific client
+- `POST /api/legal/create` - Create a new legal team member
+- `GET /api/legal/list` - List all legal team members
+- `DELETE /api/legal/delete/{member_id}` - Delete a legal team member
 
-This creates an optimized build in the `dist/` folder.
+### Documents & Files
+- `POST /api/documents/upload` - Upload document to S3 and trigger NLP text extraction
+- `GET /api/documents/list` - List documents assigned to the requesting user
+- `GET /api/documents/stats` - Overall document statistics
+- `GET /api/documents/download/{document_id}` - Download original document
+- `GET /api/documents/download-redline/{document_id}` - Download redlined document locally
+- `POST /api/documents/download-redline-docs/{document_id}` - Export redlined document features to docs
+- `POST /api/documents/google-doc/{document_id}` - Integrate with Google Docs
+- `POST /api/documents/send-redline/{document_id}` - Send redline version to client
+- `POST /api/documents/approve/{document_id}` - Approve complete document
+- `POST /api/documents/reject/{document_id}` - Reject complete document
+- `POST /api/documents/finalize/{document_id}` - Finalize document version
+- `POST /api/documents/reprocess/{document_id}` - Reprocess document text extraction and classification
 
-### Deployment Options:
-- **Vercel** - For frontend
-- **Heroku** - For backend
-- **Docker** - Containerize both services
-- **AWS/Azure/GCP** - Cloud deployment
+### Document Review & Core Operations
+- `GET /api/documents/analysis/{document_id}` - Read overall document extraction data
+- `GET /api/documents/review/{document_id}` - Fetch AI clause-by-clause review
+- `POST /api/documents/review/{document_id}/edit` - Edit a specific clause content
+- `POST /api/documents/review/{document_id}/comment` - Leave manual comments on clauses
+- `POST /api/documents/review/{document_id}/action` - Trigger review actions on clauses
 
-## 📝 Development Scripts
+### AI & LLM Specific Endpoints
+- `POST /api/documents/review/{document_id}/ask-llm` - Query LLM directly to analyze and explain specific risky clauses
+- `POST /api/documents/chat/{document_id}` - Real-time AI chat session regarding document details
+- `POST /api/documents/review/{document_id}/suggest` - Ask AI structural or alternative language suggestions
+- `POST /api/documents/review/{document_id}/suggestion-action` - Accept or reject AI-provided suggestions
 
-**Frontend:**
-```bash
-npm run dev      # Start development server
-npm run build    # Build for production
-npm run preview  # Preview production build
-npm run lint     # Lint code
-```
+### Messaging
+- `POST /api/messages/send` - Send in-app chat message between client/admin
+- `GET /api/messages/list/{other_user_id}` - Fetch chat history for users
 
-**Backend:**
-```bash
-python main.py   # Start FastAPI server
-```
+### Contracts & Obligations
+- `POST /api/contracts/share-with-client` - Share specific contracts to clients
+- `GET /api/contracts/from-legal` - List contracts received from legal
+- `POST /api/contracts/accept/{contract_id}` - Client accepts specific contract
+- `POST /api/contracts/reject/{contract_id}` - Client rejects specific contract
+- `POST /api/contracts/accept-mandate` - Mandate acceptance
+- `POST /api/contracts/reject-mandate` - Mandate rejection
+- `GET /api/contracts/download/{contract_id}` - Download contract file
 
-## 🐛 Troubleshooting
+### Templates Management
+- `POST /api/templates/upload` - Admin uploads a new standard baseline template
+- `GET /api/templates/analysis/{template_id}` - View clause breakdown of a template
+- `GET /api/templates/download/{template_id}` - Download a template file
+- `GET /api/templates/list` - List all uploaded admin templates
+- `GET /api/templates/latest-nda` - Fetch the most recently added NDA format
 
-**Issue: "Cannot connect to backend"**
-- Ensure backend is running on port 8000
-- Check CORS settings in FastAPI
-- Verify API_URL in frontend components
+### Activity Verification
+- `GET /api/activity/list` - Complete log history of app actions
 
-**Issue: "Email not sending"**
-- Verify SMTP credentials
-- Check Gmail App Password is correct
-- Ensure 2FA is enabled on Gmail account
+## Dependencies
 
-**Issue: "Port already in use"**
-- Change port in `vite.config.js` or `main.py`
-- Kill existing processes on the port
+**Backend (`requirements.txt`):**
+- **Core APIs:** `fastapi`, `uvicorn`, `python-multipart`, `python-dotenv`, `pydantic[email]`
+- **Authentication:** `PyJWT`
+- **Database Support:** `psycopg2-binary`, `pgvector`
+- **Cloud & Network:** `boto3`, `requests`
+- **Document Extractors:** `pandas`, `pillow`, `pdfplumber`, `python-docx`, `flask`, `spacy`, `numpy`
+- **Google Integration:** `google-api-python-client`, `google-auth-httplib2`, `google-auth-oauthlib`
+- **AI/ML/Langchain:** `sentence-transformers`, `mistralai`, `langchain`, `langchain-community`, `langchain-mistralai`, `langchain-huggingface`, `langchain-text-splitters`
 
-## 📄 License
+**Frontend (`package.json`):**
+- **Core Application:** `react`, `react-dom`, `react-router-dom`, `react-markdown`
+- **Build/Dev:** `vite`, `eslint`, `@vitejs/plugin-react`
 
-MIT License
+## Complete Project Flows
 
-## 🤝 Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. The legal team has its own credentials. The legal admin can add legal members, and they share a common dashboard.
+2. The legal team can invite clients via email by providing a username and password. The email is sent using EmailJS.
+3. Clients log in using the provided credentials.
+4. The client and legal team can communicate via chat.
+5. When a client logs in for the first time, an NDA uploaded by the legal team (in the standard templates section of the legal dashboard) is automatically shared with the client.
+6. The client can either accept or reject the document. If the client rejects it, they can upload either a redlined document or their own contract.
+7. In the case of a redlined document, the uploaded file is displayed in the legal team’s client workspace. When the legal team clicks "Review," the redlined contract opens in Google Docs, where they can manually accept or reject changes.
+8. In the case of a client’s own contract:
+   - The uploaded contract is processed to extract and classify clauses.
+   - These clauses are compared with standard clauses using SBERT.
+   - Based on similarity scores, a threshold is applied to classify risks as Low, Medium, or High, with risk tagging for each clause.
+   - The legal team can review all risks in a side-by-side viewer, where standard clauses are shown on one side and the client’s clauses on the other.
+   - When a specific clause is selected, the legal team can run AI analysis to understand why it is considered risky.
+   - The legal team can edit and comment on the client’s clauses.
+   - Finally, the edited version can be downloaded and shared with the client, who can view it as a redlined document in Google Docs.
+9. The legal team can also interact with an AI assistant for general queries regarding clauses.
+10. This workflow (both redlined and own contract flows) applies to all contract types such as RA, SOW, and MSA.
+11. Once both the client and legal team accept the document, they can upload the final contract and mark it as finalized. The legal team makes the final decision, and the finalized document is displayed on both the legal and client dashboards.
 
 ---
-
-Built with ❤️ using React + Vite + FastAPI
