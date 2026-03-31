@@ -959,11 +959,16 @@ async def upload_document(
         details=f"Document: {file.filename} ({document_type})"
     )
     
-    # Trigger automated extraction in background (Skip for Redlined)
+    # Trigger automated extraction in background (Skip for Redlined and Final docs)
     source = "client" if current_user["role"] == "client" else "legal"
+    # Check if the document type contains 'Final' or if it was marked as final
+    is_strictly_final = "Final" in document_type or is_final
+    is_redlined = "Redlined" in document_type or "(Redlined)" in document_type
+
     if s3_url:
-        is_redlined = "Redlined" in document_type or "(Redlined)" in document_type
-        if is_redlined:
+        if is_strictly_final:
+            print(f"📄 [SKIP] Extraction & classification skipped for Final document: {file_name}")
+        elif is_redlined:
             print(f"📄 [SKIP] Extraction skipped for redlined document: {file_name}")
         else:
             background_tasks.add_task(trigger_extraction, file_name, doc_uuid, document_type, source)
@@ -1129,6 +1134,7 @@ def add_clause_comment(document_id: str, comment_request: ClauseCommentRequest, 
                 """,
                 (comment_request.content_id, original_content, comment_request.comment)
             )
+            cur.execute("UPDATE documents SET google_doc_id = NULL WHERE id = %s", (document_id,))
         conn.commit()
         return {"message": "Comment saved successfully"}
     except Exception as e:
@@ -1267,7 +1273,7 @@ def download_redline(document_id: str, background_tasks: BackgroundTasks, curren
                     del_elem = OxmlElement('w:del')
                     del_elem.set(qn('w:id'), str(tc_id_counter))
                     tc_id_counter += 1
-                    del_elem.set(qn('w:author'), "LACCIS Redline")
+                    del_elem.set(qn('w:author'), "TYN Legal Team")
                     del_elem.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
                     r = OxmlElement('w:r')
                     dt = OxmlElement('w:delText')
@@ -1283,7 +1289,7 @@ def download_redline(document_id: str, background_tasks: BackgroundTasks, curren
                     ins.set(qn('w:id'), str(tc_id_counter))
                     tc_id_counter += 1
                     # Try to attribute to a pending suggestion if this segment matches
-                    ins.set(qn('w:author'), "LACCIS Redline")
+                    ins.set(qn('w:author'), "TYN Legal Team")
                     ins.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
                     r = OxmlElement('w:r')
                     t = OxmlElement('w:t')
@@ -1300,7 +1306,8 @@ def download_redline(document_id: str, background_tasks: BackgroundTasks, curren
             
             comment_elem = OxmlElement('w:comment')
             comment_elem.set(qn('w:id'), comment_id_str)
-            comment_elem.set(qn('w:author'), "Legal Team")
+            comment_elem.set(qn('w:author'), "TYN Legal Team")
+            comment_elem.set(qn('w:date'), datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))
             
             c_p = OxmlElement('w:p')
             c_r = OxmlElement('w:r')
@@ -1526,7 +1533,7 @@ def download_redline_docs(document_id: str, background_tasks: BackgroundTasks, c
                     del_elem = OxmlElement('w:del')
                     del_elem.set(qn('w:id'), str(tc_id_counter))
                     tc_id_counter += 1
-                    del_elem.set(qn('w:author'), "LACCIS Redline")
+                    del_elem.set(qn('w:author'), "TYN Legal Team")
                     del_elem.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
                     r = OxmlElement('w:r')
                     dt = OxmlElement('w:delText')
@@ -1541,7 +1548,7 @@ def download_redline_docs(document_id: str, background_tasks: BackgroundTasks, c
                     ins = OxmlElement('w:ins')
                     ins.set(qn('w:id'), str(tc_id_counter))
                     tc_id_counter += 1
-                    ins.set(qn('w:author'), "LACCIS Redline")
+                    ins.set(qn('w:author'), "TYN Legal Team")
                     ins.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
                     r = OxmlElement('w:r')
                     t = OxmlElement('w:t')
@@ -1557,7 +1564,8 @@ def download_redline_docs(document_id: str, background_tasks: BackgroundTasks, c
             comment_id_counter += 1
             comment_elem = OxmlElement('w:comment')
             comment_elem.set(qn('w:id'), comment_id_str)
-            comment_elem.set(qn('w:author'), "Legal Team")
+            comment_elem.set(qn('w:author'), "TYN Legal Team")
+            comment_elem.set(qn('w:date'), datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))
             c_p = OxmlElement('w:p')
             c_r = OxmlElement('w:r')
             c_t = OxmlElement('w:t')
@@ -1780,7 +1788,7 @@ def open_in_google_docs(document_id: str, background_tasks: BackgroundTasks, cur
                     del_elem = OxmlElement('w:del')
                     del_elem.set(qn('w:id'), str(tc_id_counter))
                     tc_id_counter += 1
-                    del_elem.set(qn('w:author'), "LACCIS Redline")
+                    del_elem.set(qn('w:author'), "TYN Legal Team")
                     del_elem.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
                     r = OxmlElement('w:r')
                     dt = OxmlElement('w:delText')
@@ -1795,7 +1803,7 @@ def open_in_google_docs(document_id: str, background_tasks: BackgroundTasks, cur
                     ins = OxmlElement('w:ins')
                     ins.set(qn('w:id'), str(tc_id_counter))
                     tc_id_counter += 1
-                    ins.set(qn('w:author'), "LACCIS Redline")
+                    ins.set(qn('w:author'), "TYN Legal Team")
                     ins.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
                     r = OxmlElement('w:r')
                     t = OxmlElement('w:t')
@@ -1811,7 +1819,8 @@ def open_in_google_docs(document_id: str, background_tasks: BackgroundTasks, cur
             comment_id_counter += 1
             comment_elem = OxmlElement('w:comment')
             comment_elem.set(qn('w:id'), comment_id_str)
-            comment_elem.set(qn('w:author'), "Legal Team")
+            comment_elem.set(qn('w:author'), "TYN Legal Team")
+            comment_elem.set(qn('w:date'), datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))
             c_p = OxmlElement('w:p')
             c_r = OxmlElement('w:r')
             c_t = OxmlElement('w:t')
@@ -1884,7 +1893,10 @@ def download_document(document_id: str, current_user: dict = Depends(verify_toke
     try:
         conn = db_pool.getconn()
         with conn.cursor() as cur:
-            cur.execute("SELECT s3_key FROM documents WHERE id = %s", (document_id,))
+            if document_id.startswith("sc-"):
+                cur.execute("SELECT s3_key FROM shared_contracts WHERE id = %s", (document_id,))
+            else:
+                cur.execute("SELECT s3_key FROM documents WHERE id = %s", (document_id,))
             res = cur.fetchone()
             if not res:
                 raise HTTPException(status_code=404, detail="Document not found")
@@ -2031,7 +2043,7 @@ def send_redline_to_client(document_id: str, background_tasks: BackgroundTasks, 
                     del_elem = OxmlElement('w:del')
                     del_elem.set(qn('w:id'), str(tc_id_counter))
                     tc_id_counter += 1
-                    del_elem.set(qn('w:author'), "LACCIS Redline")
+                    del_elem.set(qn('w:author'), "TYN Legal Team")
                     del_elem.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
                     r = OxmlElement('w:r')
                     dt = OxmlElement('w:delText')
@@ -2046,7 +2058,7 @@ def send_redline_to_client(document_id: str, background_tasks: BackgroundTasks, 
                     ins = OxmlElement('w:ins')
                     ins.set(qn('w:id'), str(tc_id_counter))
                     tc_id_counter += 1
-                    ins.set(qn('w:author'), "LACCIS Redline")
+                    ins.set(qn('w:author'), "TYN Legal Team")
                     ins.set(qn('w:date'), datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ'))
                     r = OxmlElement('w:r')
                     t = OxmlElement('w:t')
@@ -2062,7 +2074,8 @@ def send_redline_to_client(document_id: str, background_tasks: BackgroundTasks, 
             comment_id_counter += 1
             comment_elem = OxmlElement('w:comment')
             comment_elem.set(qn('w:id'), comment_id_str)
-            comment_elem.set(qn('w:author'), "Legal Team")
+            comment_elem.set(qn('w:author'), "TYN Legal Team")
+            comment_elem.set(qn('w:date'), datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))
             c_p = OxmlElement('w:p')
             c_r = OxmlElement('w:r')
             c_t = OxmlElement('w:t')
@@ -2224,11 +2237,11 @@ def list_documents(current_user: dict = Depends(verify_token)):
     try:
         with conn.cursor() as cur:
             if current_user["role"] in ("admin", "legal_team"):
-                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with, is_finalized, client_marked_final FROM documents ORDER BY uploaded_at DESC")
+                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with, is_finalized, client_marked_final, user_role FROM documents ORDER BY uploaded_at DESC")
             else:
-                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with, is_finalized, client_marked_final FROM documents WHERE user_id = %s OR shared_with @> %s::jsonb ORDER BY uploaded_at DESC", (current_user["user_id"], json.dumps([current_user["user_id"]])))
+                cur.execute("SELECT id, user_id, filename, document_type, status, uploaded_at, s3_key, size, shared_with, is_finalized, client_marked_final, user_role FROM documents WHERE user_id = %s OR shared_with @> %s::jsonb ORDER BY uploaded_at DESC", (current_user["user_id"], json.dumps([current_user["user_id"]])))
             rows = cur.fetchall()
-            return {"documents": [{"id": r[0], "user_id": r[1], "filename": r[2], "document_type": r[3], "status": r[4], "uploaded_at": r[5].isoformat() if r[5] else None, "s3_key": r[6], "size": r[7], "shared_with": r[8], "is_finalized": r[9], "client_marked_final": r[10]} for r in rows]}
+            return {"documents": [{"id": r[0], "user_id": r[1], "filename": r[2], "document_type": r[3], "status": r[4], "uploaded_at": r[5].isoformat() if r[5] else None, "s3_key": r[6], "size": r[7], "shared_with": r[8], "is_finalized": r[9], "client_marked_final": r[10], "user_role": r[11]} for r in rows]}
     except Exception as e:
         print(f"[ERROR] list_documents error: {e}")
         raise HTTPException(status_code=500, detail="Database error")
@@ -2246,15 +2259,34 @@ def finalize_document(document_id: str, current_user: dict = Depends(verify_toke
     try:
         conn = db_pool.getconn()
         with conn.cursor() as cur:
+            # 1. Fetch info about the document
+            if document_id.startswith("sc-"):
+                cur.execute("SELECT document_type, client_id, is_finalized, filename FROM shared_contracts WHERE id = %s", (document_id,))
+                row = cur.fetchone()
+                if not row: raise HTTPException(status_code=404, detail="Document not found")
+                doc_type, doc_client_id, current_final, filename = row
+            else:
+                cur.execute("SELECT document_type, user_id, is_finalized, filename FROM documents WHERE id = %s", (document_id,))
+                row = cur.fetchone()
+                if not row: raise HTTPException(status_code=404, detail="Document not found")
+                doc_type, doc_client_id, current_final, filename = row
+                
             # Toggle logic
-            cur.execute("UPDATE documents SET is_finalized = NOT is_finalized WHERE id = %s RETURNING is_finalized, filename, user_id", (document_id,))
-            res = cur.fetchone()
-            if not res:
-                raise HTTPException(status_code=404, detail="Document not found")
+            new_status = not current_final
+
+            if new_status is True:
+                # 2. Enforce Single Final rule: unset all others of the exact same doc_type for this client
+                cur.execute("UPDATE shared_contracts SET is_finalized = false WHERE client_id = %s AND document_type = %s AND id != %s", (doc_client_id, doc_type, document_id))
+                cur.execute("UPDATE documents SET is_finalized = false WHERE user_id = %s AND document_type = %s AND id != %s", (doc_client_id, doc_type, document_id))
+
+            # 3. Apply the toggled status to current doc
+            if document_id.startswith("sc-"):
+                cur.execute("UPDATE shared_contracts SET is_finalized = %s WHERE id = %s", (new_status, document_id))
+            else:
+                cur.execute("UPDATE documents SET is_finalized = %s WHERE id = %s", (new_status, document_id))
             
-            new_status, filename, doc_user_id = res
             status_text = "Finalized" if new_status else "Un-finalized"
-            record_activity(current_user["user_id"], doc_user_id, f"{status_text} document", f"Document: {filename}")
+            record_activity(current_user["user_id"], doc_client_id, f"{status_text} document", f"Document: {filename}")
             
         conn.commit()
         return {"message": f"Document {status_text.lower()} successfully", "is_finalized": new_status}
@@ -2351,6 +2383,8 @@ async def share_contract_with_client(
         print(f"✗ [SHARE] 403: Role {current_user['role']} not authorized")
         raise HTTPException(status_code=403)
     content = await file.read()
+    file_size_bytes = len(content)
+
     file_name = f"shared_{uuid.uuid4().hex[:6]}_{file.filename}"
     file_path = UPLOADS_DIR / file_name
     with open(file_path, "wb") as f: f.write(content)
@@ -2363,20 +2397,25 @@ async def share_contract_with_client(
     conn = db_pool.getconn()
     try:
         with conn.cursor() as cur:
-            cur.execute("INSERT INTO shared_contracts (id, filename, shared_by, shared_by_email, client_id, message, status, shared_at, s3_key, file_path, document_type, is_finalized) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-                        (contract_id, file.filename, current_user["user_id"], current_user.get("email", ""), client_id, message, 'pending_review', datetime.now(), s3_key, str(file_path), document_type, is_final))
+            cur.execute("INSERT INTO shared_contracts (id, filename, shared_by, shared_by_email, client_id, message, status, shared_at, s3_key, file_path, document_type, is_finalized, size) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (contract_id, file.filename, current_user["user_id"], current_user.get("email", ""), client_id, message, 'pending_review', datetime.now(), s3_key, str(file_path), document_type, is_final, file_size_bytes))
             conn.commit()
             record_activity(current_user["user_id"], client_id, "Shared contract", f"{document_type}: {file.filename}")
             return {"message": "Shared", "id": contract_id}
     finally: db_pool.putconn(conn)
 
 @app.get("/api/contracts/from-legal")
-def get_contracts_from_legal(current_user: dict = Depends(verify_token)):
+def get_contracts_from_legal(client_id: Optional[str] = None, current_user: dict = Depends(verify_token)):
     conn = db_pool.getconn()
     try:
+        target_client_id = current_user["user_id"]
+        # Allow admins/legal_team to view contracts sent to a specific client
+        if client_id and current_user["role"] in ["admin", "legal_team"]:
+            target_client_id = client_id
+
         with conn.cursor() as cur:
             # 1. Get explicitly shared contracts
-            cur.execute("SELECT id, filename, document_type, shared_by, shared_by_email, message, size, status, shared_at, s3_key, is_finalized FROM shared_contracts WHERE client_id = %s ORDER BY shared_at DESC", (current_user["user_id"],))
+            cur.execute("SELECT id, filename, document_type, shared_by, shared_by_email, message, size, status, shared_at, s3_key, is_finalized FROM shared_contracts WHERE client_id = %s ORDER BY shared_at DESC", (target_client_id,))
             rows = cur.fetchall()
             contracts = []
             for r in rows:
@@ -2389,7 +2428,7 @@ def get_contracts_from_legal(current_user: dict = Depends(verify_token)):
                 })
 
             # Always inject the latest NDA for clients to show current status
-            cur.execute("SELECT nda_accepted, nda_rejected FROM users WHERE id = %s", (current_user["user_id"],))
+            cur.execute("SELECT nda_accepted, nda_rejected FROM users WHERE id = %s", (target_client_id,))
             user_nda = cur.fetchone()
             if user_nda:
                 cur.execute(
@@ -2416,6 +2455,37 @@ def get_contracts_from_legal(current_user: dict = Depends(verify_token)):
                     })
             return {"contracts": contracts}
     finally: db_pool.putconn(conn)
+
+@app.get("/api/contracts/all-shared")
+def get_all_shared_contracts(current_user: dict = Depends(verify_token)):
+    if current_user["role"] not in ("admin", "legal_team"):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    conn = db_pool.getconn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, client_id, filename, document_type, status, shared_at, s3_key, size, is_finalized FROM shared_contracts ORDER BY shared_at DESC")
+            rows = cur.fetchall()
+            return {
+                "contracts": [
+                    {
+                        "id": r[0],
+                        "client_id": r[1],
+                        "filename": r[2],
+                        "document_type": r[3],
+                        "status": r[4],
+                        "uploaded_at": r[5].isoformat() if r[5] else None,
+                        "s3_key": r[6],
+                        "size": r[7],
+                        "is_finalized": r[8]
+                    } for r in rows
+                ]
+            }
+    except Exception as e:
+        print(f"[ERROR] all-shared error: {e}")
+        raise HTTPException(status_code=500, detail="Database error")
+    finally:
+        if conn: db_pool.putconn(conn)
+
 
 @app.post("/api/contracts/accept/{contract_id}")
 def accept_shared_contract(contract_id: str, current_user: dict = Depends(verify_token)):
@@ -2743,7 +2813,7 @@ def create_suggestion(document_id: str, req: SuggestionCreate, current_user: dic
                 change_type = "replace"
 
             sug_id = f"sug-{uuid.uuid4().hex[:8]}"
-            author = req.author or current_user.get("email", current_user.get("user_id", "Unknown"))
+            author = "TYN Legal Team"
 
             cur.execute(
                 """
@@ -2759,6 +2829,7 @@ def create_suggestion(document_id: str, req: SuggestionCreate, current_user: dic
                     change_type, req.original_text, req.suggested_text, author
                 )
             )
+            cur.execute("UPDATE documents SET google_doc_id = NULL WHERE id = %s", (document_id,))
         conn.commit()
         return {"message": "Suggestion created", "suggestion_id": sug_id, "change_type": change_type}
     except HTTPException:
@@ -2838,6 +2909,7 @@ def suggestion_action(document_id: str, req: SuggestionAction, current_user: dic
                     """,
                     (updated_content, cid)
                 )
+            cur.execute("UPDATE documents SET google_doc_id = NULL WHERE id = %s", (document_id,))
         conn.commit()
         return {"message": f"Suggestion {req.action}ed", "suggestion_id": req.suggestion_id}
     except HTTPException:
@@ -3164,6 +3236,7 @@ def clause_action(document_id: str, req: ClauseActionRequest, current_user: dict
                 )
                 if cur.fetchone():
                     updated = True
+                cur.execute("UPDATE documents SET google_doc_id = NULL WHERE id = %s", (document_id,))
             conn.commit()
         except Exception as e:
             print(f"[ERROR] DB update failed for clause action: {e}")
