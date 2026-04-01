@@ -2007,10 +2007,17 @@ def download_document(document_id: str, current_user: dict = Depends(verify_toke
     if not s3_key:
         raise HTTPException(status_code=400, detail="File not on S3")
         
+    # Basic extension detection
+    mime_type = "application/pdf" if s3_key.lower().endswith(".pdf") else "application/octet-stream"
     try:
         url = s3_client.generate_presigned_url(
             'get_object',
-            Params={'Bucket': BUCKET_NAME, 'Key': s3_key},
+            Params={
+                'Bucket': BUCKET_NAME, 
+                'Key': s3_key,
+                'ResponseContentDisposition': 'inline',
+                'ResponseContentType': mime_type
+            },
             ExpiresIn=3600
         )
         return {"download_url": url}
@@ -2729,11 +2736,21 @@ def download_shared_contract(contract_id: str, current_user: dict = Depends(veri
             s3_key = res[0]
             if s3_key:
                 try:
-                    url = s3_client.generate_presigned_url('get_object', Params={'Bucket': BUCKET_NAME, 'Key': s3_key}, ExpiresIn=3600)
+                    mime_type = "application/pdf" if s3_key.lower().endswith(".pdf") else "application/octet-stream"
+                    url = s3_client.generate_presigned_url(
+                        'get_object', 
+                        Params={
+                            'Bucket': BUCKET_NAME, 
+                            'Key': s3_key,
+                            'ResponseContentDisposition': 'inline',
+                            'ResponseContentType': mime_type
+                        }, 
+                        ExpiresIn=3600
+                    )
                     return {"download_url": url}
                 except: pass
             fp = Path(res[2] or "")
-            if fp.exists(): return FileResponse(path=str(fp), filename=res[3])
+            if fp.exists(): return FileResponse(path=str(fp), filename=res[3], content_disposition_type="inline")
             raise HTTPException(status_code=404)
     finally: db_pool.putconn(conn)
 
@@ -2836,12 +2853,35 @@ def download_template(template_id: str, current_user: dict = Depends(verify_toke
             res = cur.fetchone()
             if not res: raise HTTPException(status_code=404)
             if res[0]:
+                s3_key = res[0]
                 try:
-                    url = s3_client.generate_presigned_url('get_object', Params={'Bucket': BUCKET_NAME, 'Key': res[0]}, ExpiresIn=3600)
+                    # Robust mime detection
+                    m_type = "application/pdf"
+                    if s3_key.lower().endswith(".docx"):
+                        m_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                    
+                    url = s3_client.generate_presigned_url(
+                        'get_object', 
+                        Params={
+                            'Bucket': BUCKET_NAME, 
+                            'Key': s3_key,
+                            'ResponseContentDisposition': 'inline',
+                            'ResponseContentType': m_type
+                        }, 
+                        ExpiresIn=3600
+                    )
                     return {"download_url": url}
-                except: pass
+                except Exception as e:
+                    print(f"[ERROR] Template URL generation failed: {e}")
+                    # Fallback to basic URL without special params if generation failed
+                    try:
+                        url = s3_client.generate_presigned_url('get_object', Params={'Bucket': BUCKET_NAME, 'Key': s3_key}, ExpiresIn=3600)
+                        return {"download_url": url}
+                    except: pass
+            
             fp = Path(res[1] or "")
-            if fp.exists(): return FileResponse(path=str(fp), filename=res[2])
+            if fp.exists(): 
+                return FileResponse(path=str(fp), filename=res[2], content_disposition_type="inline")
             raise HTTPException(status_code=404)
     finally: db_pool.putconn(conn)
 
