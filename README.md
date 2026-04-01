@@ -59,7 +59,7 @@ LACCIS is a modern, responsive web application designed for legal document manag
 - Neon DB (Serverless Postgres with pgvector for Relational & Vector storage)
 - AWS S3 (Document object storage)
 - PyJWT (Authentication)
-- Sentence-Transformers & Mistral AI & Langchain (AI, NLP, OCR, Text Extraction, AI Chat, Summarization)
+- Sentence-Transformers & LangChain (Supports OpenAI, Mistral, Anthropic, Google, Groq for AI Chat, Risk Analysis, and Summarization)
 
 ## Environment Variables (`.env`)
 Create a `.env` file in the `backend` directory strictly with these variable names:
@@ -77,17 +77,23 @@ EMAILJS_PRIVATE_KEY=
 JWT_SECRET=
 ADMIN_PASSWORD=
 
+# SSO Configuration (Central Identity Integration)
+SSO_ENDPOINT=
+SSO_COOKIE_NAME=
+CENTRAL_LOGOUT_URL=
+
 # AWS S3 Storage
 AWS_ACCESS_KEY=
 AWS_SECRET_KEY=
 REGION=
 BUCKET_NAME=
 
-# AI Settings
+# AI Settings (LangChain & Embeddings)
 MODEL_NAME=
-SIMILARITY_HIGH=
-SIMILARITY_MEDIUM=
-MISTRAL_API=
+LLM_PROVIDER= # e.g., openai, mistral, anthropic, google_genai, groq
+LLM_MODEL=
+LLM_API_KEY=
+LLM_TEMPERATURE=
 
 # Google Drive Integration
 GOOGLE_DRIVE_FOLDER_ID=
@@ -165,7 +171,7 @@ GOOGLE_OAUTH_TOKEN_JSON=
 - **Cloud & Network:** `boto3`, `requests`
 - **Document Extractors:** `pandas`, `pillow`, `pdfplumber`, `python-docx`, `flask`, `spacy`, `numpy`
 - **Google Integration:** `google-api-python-client`, `google-auth-httplib2`, `google-auth-oauthlib`
-- **AI/ML/Langchain:** `sentence-transformers`, `mistralai`, `langchain`, `langchain-community`, `langchain-mistralai`, `langchain-huggingface`, `langchain-text-splitters`
+- **AI/ML/LangChain:** `sentence-transformers`, `langchain`, `langchain-openai`, `langchain-anthropic`, `langchain-google-genai`, `langchain-groq`, `langchain-mistralai`, `langchain-text-splitters`
 
 **Frontend (`package.json`):**
 - **Core Application:** `react`, `react-dom`, `react-router-dom`, `react-markdown`
