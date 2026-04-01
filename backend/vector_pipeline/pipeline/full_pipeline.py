@@ -34,7 +34,7 @@ def run_pipeline(query_text: str, clause_type: str = None, document_type: str = 
             item = {
                 "client_content":    query_text,
                 "template_content":  doc.page_content,
-                "chroma_score":      round(float(score), 4),
+                "vector_score":      round(float(score), 4),
                 "sbert_similarity":  sbert_score,
                 **risk_result,
                 "template_metadata": doc.metadata,

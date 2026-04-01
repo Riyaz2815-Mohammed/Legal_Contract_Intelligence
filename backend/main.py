@@ -55,7 +55,6 @@ app.add_middleware(
 )
 
 # Security constants (HTTPBearer instance is defined later, after SSO config is loaded)
-SECRET_KEY = "your-secret-key-change-in-production"
 ALGORITHM = "HS256"
 
 # Data storage
@@ -68,6 +67,7 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 # Load environment variables                
 env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
 load_dotenv(env_path)
+SECRET_KEY = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
 EMAILJS_SERVICE_ID = os.getenv("EMAILJS_SERVICE_ID")
 EMAILJS_TEMPLATE_ID = os.getenv("EMAILJS_TEMPLATE_ID")
 EMAILJS_PUBLIC_KEY = os.getenv("EMAILJS_PUBLIC_KEY")

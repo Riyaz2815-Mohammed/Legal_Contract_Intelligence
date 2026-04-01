@@ -1,9 +1,9 @@
 """
-reasoning.py — Calls Mistral AI directly (bypasses LangChain to avoid compatibility issues).
+reasoning.py — Calls LLM via generic LangChain wrapper.
 Compares client clause vs standard clause and returns concise reasoning + suggestions.
 """
-from mistralai import Mistral
-from vector_pipeline.config.settings import MISTRAL_API_KEY, MISTRAL_MODEL
+from vector_pipeline.llm.llm_factory import get_llm_instance
+from langchain_core.messages import HumanMessage
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,10 +12,9 @@ logger = logging.getLogger(__name__)
 def run_llm_reasoning(item: dict) -> str:
     """
     Legacy function: called during background pipeline for high-risk clauses.
-    Uses simple direct Mistral call.
     """
     try:
-        client = Mistral(api_key=MISTRAL_API_KEY)
+        llm = get_llm_instance()
         prompt = f"""You are a legal contract analyst. Analyze this clause briefly.
 
 Clause Type: {item.get('clause', 'Unknown')}
@@ -28,11 +27,8 @@ Give:
 
 Be concise and professional."""
 
-        res = client.chat.complete(
-            model=MISTRAL_MODEL,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return res.choices[0].message.content
+        res = llm.invoke([HumanMessage(content=prompt)])
+        return res.content
     except Exception as e:
         logger.error(f"LLM reasoning failed: {e}")
         return f"Analysis unavailable: {str(e)}"
@@ -44,7 +40,7 @@ def compare_clauses(client_clause: str, standard_clause: str, clause_type: str, 
     Compares client clause vs standard clause and gives reasoning + suggestions.
     """
     try:
-        client = Mistral(api_key=MISTRAL_API_KEY)
+        llm = get_llm_instance()
 
         has_standard = bool(standard_clause and standard_clause.strip())
 
@@ -81,11 +77,8 @@ Provide:
 
 Keep it brief and professional."""
 
-        res = client.chat.complete(
-            model=MISTRAL_MODEL,
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return res.choices[0].message.content
+        res = llm.invoke([HumanMessage(content=prompt)])
+        return res.content
     except Exception as e:
         logger.error(f"LLM comparison failed: {e}")
         return f"Analysis unavailable: {str(e)}"

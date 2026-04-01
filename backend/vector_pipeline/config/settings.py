@@ -8,19 +8,18 @@ load_dotenv(dotenv_path=env_path)
 # Database
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Mistral
-MISTRAL_API_KEY = os.getenv("MISTRAL_API")
-MISTRAL_MODEL = "mistral-large-latest"
-MISTRAL_TEMPERATURE = 0.2
+# LLM 
+LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai").strip().lower()
+LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o")
+LLM_API_KEY = os.getenv("LLM_API_KEY", "")
+LLM_TEMPERATURE = float(os.getenv("LLM_TEMPERATURE", "0.2"))
 
 # Embedding
 EMBEDDING_MODEL = os.getenv("MODEL_NAME", "all-MiniLM-L6-v2")
 EMBEDDING_DEVICE = "cpu"
 EMBEDDING_NORMALIZE = True
 
-# ChromaDB (REPLACED BY SUPABASE PGVECTOR)
-# CHROMA_PERSIST_DIR = os.path.join(backend_dir, "data", "chroma_legal_db")
-# CHROMA_COLLECTION = "legal_clauses"
+
 
 # Pipeline
 TOP_K = 5

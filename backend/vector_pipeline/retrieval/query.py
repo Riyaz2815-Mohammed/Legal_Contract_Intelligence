@@ -85,7 +85,7 @@ def search_similar_clauses(query_embedding: list, top_k: int = TOP_K, clause_typ
 
 def query_vectorstore(query_text: str, embedding_model, clause_type: str = None, top_k: int = TOP_K) -> list:
     """
-    Adapter function to replace the ChromaDB query logic.
+    Adapter function to fetch from PGVector.
     """
     try:
         # Generate embedding for the query text
@@ -100,8 +100,6 @@ def query_vectorstore(query_text: str, embedding_model, clause_type: str = None,
             from langchain_core.documents import Document
             doc = Document(page_content=r["page_content"], metadata=r["metadata"])
             # The downstream code expects (doc, score) where score is distance (or similar metric)
-            # In Chroma's similarity_search_with_score, it's often L2 distance (lower is better).
-            # full_pipeline uses sbert_score later, so we just need something here.
             formatted_results.append((doc, r["score"]))
             
         return formatted_results

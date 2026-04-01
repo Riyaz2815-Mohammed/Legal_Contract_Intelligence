@@ -1,13 +1,12 @@
 import json
-import langchain  # Compatibility patch: langchain 1.x removed these module-level attributes
+import langchain  
 if not hasattr(langchain, 'verbose'):   langchain.verbose = False
 if not hasattr(langchain, 'debug'):     langchain.debug = False
 if not hasattr(langchain, 'llm_cache'): langchain.llm_cache = None
 
-from langchain_mistralai import ChatMistralAI
+from vector_pipeline.llm.llm_factory import get_llm_instance
 from langchain_core.messages import SystemMessage, HumanMessage
 from langchain_core.tools import tool
-from vector_pipeline.config.settings import MISTRAL_API_KEY, MISTRAL_MODEL, MISTRAL_TEMPERATURE
 from vector_pipeline.embeddings.embed_store import get_embedding_model
 from vector_pipeline.retrieval.query import query_vectorstore
 
@@ -16,13 +15,11 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Basic in-memory conversational storage for demo purposes
-# In production, this should ideally use a proper DB-backed memory per session.
 session_memory = {}
 
 @tool
 def search_standard_templates(query: str, clause_type: str = None) -> str:
-    """Searches the standard legal templates (ChromaDB) for similar clauses. 
+    """Searches the standard legal templates for similar clauses. 
     Use this to see what 'Standard' language looks like for a specific topic.
     If searching for a specific clause type, provide it."""
     try:
@@ -112,12 +109,8 @@ def get_risk_analysis(document_id: str) -> str:
             conn.close()
 
 def get_agent_executor():
-    """Returns a Mistral agent equipped with the tools."""
-    llm = ChatMistralAI(
-        model=MISTRAL_MODEL,
-        mistral_api_key=MISTRAL_API_KEY,
-        temperature=MISTRAL_TEMPERATURE
-    )
+    """Returns a generic LLM agent equipped with the tools."""
+    llm = get_llm_instance()
     # Bind the tools to the LLM
     llm_with_tools = llm.bind_tools([search_standard_templates, get_client_clauses, get_risk_analysis])
     return llm_with_tools

@@ -33,8 +33,8 @@ const ClientWorkspace = ({ user, onLogout }) => {
     const loadData = async () => {
         try {
             const [clientsRes, docsRes] = await Promise.all([
-                apiFetch('/api/clients/list');
-                apiFetch('/api/documents/list');
+                apiFetch('/api/clients/list'),
+                apiFetch('/api/documents/list'),
             ]);
 
             const clientsData = await clientsRes.json();
