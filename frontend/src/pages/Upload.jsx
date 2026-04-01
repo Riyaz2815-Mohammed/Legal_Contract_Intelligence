@@ -4,8 +4,7 @@ import UploadArea from '../components/UploadArea';
 import DocumentsTable from '../components/DocumentsTable';
 import Modal from '../components/Modal';
 import './Dashboard.css';
-
-const API_URL = 'http://localhost:8000';
+import { apiFetch } from '../utils/api';
 
 function Upload({ user, onLogout }) {
     const [documents, setDocuments] = useState([]);
@@ -16,10 +15,7 @@ function Upload({ user, onLogout }) {
 
     const loadDocuments = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/documents/list`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const response = await apiFetch('/api/documents/list');
             const data = await response.json();
             if (response.ok) {
                 setDocuments(data.documents);
@@ -36,10 +32,7 @@ function Upload({ user, onLogout }) {
     const loadClients = async () => {
         if (isLegal) {
             try {
-                const token = localStorage.getItem('token');
-                const response = await fetch(`${API_URL}/api/clients/list`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
+                const response = await apiFetch('/api/clients/list');
                 const data = await response.json();
                 if (response.ok) {
                     setClients(data.clients);
@@ -62,10 +55,8 @@ function Upload({ user, onLogout }) {
 
     const handleApprove = async (documentId) => {
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/documents/approve/${documentId}`, {
+            const response = await apiFetch('/api/documents/approve/${documentId}', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` }
             });
             if (response.ok) loadDocuments();
         } catch (error) {
@@ -79,17 +70,8 @@ function Upload({ user, onLogout }) {
 
     const handleShareSubmit = async (clientId) => {
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/documents/share`, {
+            const response = await apiFetch('/api/documents/share', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                    document_id: shareModal.document.id,
-                    share_with: clientId
-                })
             });
             if (response.ok) {
                 setShareModal({ open: false, document: null });

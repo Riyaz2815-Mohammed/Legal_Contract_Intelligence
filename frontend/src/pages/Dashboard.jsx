@@ -4,9 +4,8 @@ import Layout from '../layouts/Layout';
 import ClientsTable from '../components/ClientsTable';
 import StatsCard from '../components/StatsCard';
 import ClientDashboard from './ClientDashboard';
+import { apiFetch } from '../utils/api';
 import './Dashboard.css';
-
-const API_URL = 'http://localhost:8000';
 
 function Dashboard({ user, onLogout }) {
     const navigate = useNavigate();
@@ -26,17 +25,9 @@ function Dashboard({ user, onLogout }) {
 
     const loadClientsAndStats = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const [clientsRes, docsRes, sharedRes] = await Promise.all([
-                fetch(`${API_URL}/api/clients/list`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                }),
-                fetch(`${API_URL}/api/documents/list`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                }),
-                fetch(`${API_URL}/api/contracts/all-shared`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                })
+        const [clientsRes, docsRes] = await Promise.all([
+                apiFetch('/api/clients/list'),
+                apiFetch('/api/documents/list'),
             ]);
 
             const clientsData = await clientsRes.json();
@@ -111,10 +102,8 @@ function Dashboard({ user, onLogout }) {
         if (!window.confirm(`Are you sure you want to delete ${client.name}?`)) return;
 
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/clients/delete/${client.id}`, {
+        const response = await apiFetch(`/api/clients/delete/${client.id}`, {
                 method: 'DELETE',
-                headers: { 'Authorization': `Bearer ${token}` }
             });
 
             if (response.ok) {

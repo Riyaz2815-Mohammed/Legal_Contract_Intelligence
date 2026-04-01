@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import Layout from '../layouts/Layout';
 import './DocumentAnalysis.css';
-
-const API_URL = 'http://localhost:8000';
+import { apiFetch } from '../utils/api';
 
 const TemplateAnalysis = ({ user, onLogout }) => {
     const { templateId } = useParams();
@@ -14,10 +13,7 @@ const TemplateAnalysis = ({ user, onLogout }) => {
     useEffect(() => {
         const fetchAnalysis = async () => {
             try {
-                const token = localStorage.getItem('token');
-                const response = await fetch(`${API_URL}/api/templates/analysis/${templateId}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
+                const response = await apiFetch('/api/templates/analysis/${templateId}');
                 const result = await response.json();
                 if (response.ok) {
                     setData(result);

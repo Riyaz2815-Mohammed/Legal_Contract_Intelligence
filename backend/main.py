@@ -8,7 +8,7 @@ os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 os.environ["MKL_SERVICE_FORCE_INTEL"] = "1" # Extra safety for MKL
 
 import asyncio
-from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status, BackgroundTasks, Form
+from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, status, BackgroundTasks, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr
@@ -48,15 +48,13 @@ async def log_requests(request, call_next):
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174",],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Security
-security = HTTPBearer()
-SECRET_KEY = "your-secret-key-change-in-production"
+# Security constants (HTTPBearer instance is defined later, after SSO config is loaded)
 ALGORITHM = "HS256"
 
 # Data storage
@@ -69,10 +67,18 @@ UPLOADS_DIR.mkdir(exist_ok=True)
 # Load environment variables                
 env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
 load_dotenv(env_path)
+SECRET_KEY = os.getenv("JWT_SECRET", "your-secret-key-change-in-production")
 EMAILJS_SERVICE_ID = os.getenv("EMAILJS_SERVICE_ID")
 EMAILJS_TEMPLATE_ID = os.getenv("EMAILJS_TEMPLATE_ID")
 EMAILJS_PUBLIC_KEY = os.getenv("EMAILJS_PUBLIC_KEY")
 EMAILJS_PRIVATE_KEY = os.getenv("EMAILJS_PRIVATE_KEY")
+
+# SSO / Auth configuration
+ALLOW_LOCAL_LOGIN = os.getenv("ALLOW_LOCAL_LOGIN", "false").strip().lower() in ("1", "true", "yes")
+SSO_ENDPOINT = os.getenv("SSO_ENDPOINT", "").strip()
+SSO_COOKIE_NAME = os.getenv("SSO_COOKIE_NAME", "auth_token").strip()
+CENTRAL_LOGOUT_URL = os.getenv("CENTRAL_LOGOUT_URL", "").strip()
+print(f"[AUTH] ALLOW_LOCAL_LOGIN={ALLOW_LOCAL_LOGIN} | SSO_ENDPOINT={'SET' if SSO_ENDPOINT else 'UNSET (local JWT fallback active)'}")
 
 # AWS Configuration
 AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY", "").strip(' "')
@@ -196,16 +202,82 @@ def create_token(user_id: str, email: str, role: str):
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
-def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+def _resolve_user_from_email(email: str) -> dict:
+    """Look up a local user by email and return their identity dict.
+    Raises 403 if the email is not onboarded in this Legal app."""
+    if not db_pool:
+        raise HTTPException(status_code=500, detail="Database not connected")
+    conn = None
     try:
-        token = credentials.credentials
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        print(f"[AUTH] Token verified: {payload.get('email')} | role: {payload.get('role')}")
+        conn = db_pool.getconn()
+        with conn.cursor() as cur:
+            cur.execute("SELECT id, email, name, role FROM users WHERE email = %s", (email,))
+            row = cur.fetchone()
+        if not row:
+            raise HTTPException(status_code=403, detail="User not onboarded in Legal app")
+        user_id, u_email, name, role = row
+        return {"user_id": user_id, "email": u_email, "name": name, "role": role}
+    finally:
+        if conn:
+            db_pool.putconn(conn)
+
+
+def _verify_via_sso(request: Request) -> dict:
+    """Validate the shared SSO cookie against the central endpoint.
+    Returns the local user dict on success.
+    Raises 401 if no cookie or SSO rejects it, 403 if not onboarded."""
+    cookie_value = request.cookies.get(SSO_COOKIE_NAME)
+    if not cookie_value:
+        raise HTTPException(status_code=401, detail="Not authenticated (no SSO cookie)")
+    try:
+        sso_resp = requests.get(
+            SSO_ENDPOINT,
+            cookies={SSO_COOKIE_NAME: cookie_value},
+            timeout=5
+        )
+    except Exception as e:
+        print(f"[AUTH] SSO endpoint unreachable: {e}")
+        raise HTTPException(status_code=401, detail="SSO endpoint unreachable")
+    if sso_resp.status_code != 200:
+        raise HTTPException(status_code=401, detail="SSO session invalid")
+    sso_data = sso_resp.json()
+    email = sso_data.get("email")
+    if not email:
+        raise HTTPException(status_code=401, detail="SSO response missing email")
+    print(f"[AUTH] SSO validated: {email}")
+    return _resolve_user_from_email(email)
+
+
+def _verify_via_local_jwt(credentials: Optional[HTTPAuthorizationCredentials]) -> dict:
+    """Validate a local JWT Bearer token (dev fallback only)."""
+    if credentials is None:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(credentials.credentials, SECRET_KEY, algorithms=[ALGORITHM])
+        print(f"[AUTH] Local JWT verified: {payload.get('email')} | role: {payload.get('role')}")
         return payload
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expired")
     except jwt.InvalidTokenError:
         raise HTTPException(status_code=401, detail="Invalid token")
+
+
+# Make security optional so it doesn't crash when SSO cookie mode is active
+security = HTTPBearer(auto_error=False)
+
+
+def verify_token(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> dict:
+    """Unified auth dependency.
+    - If SSO_ENDPOINT is configured: validates the shared SSO cookie (production).
+    - Otherwise: falls back to local JWT Bearer token (dev mode).
+    """
+    if SSO_ENDPOINT:
+        return _verify_via_sso(request)
+    # Local JWT fallback
+    return _verify_via_local_jwt(credentials)
 
 def send_email(to_email: str, subject: str, body: str):
     """
@@ -290,8 +362,33 @@ def send_email(to_email: str, subject: str, body: str):
 def root():
     return {"message": "LACCIS API is running", "version": "1.0.0"}
 
+
+@app.get("/auth/me")
+def auth_me(
+    request: Request,
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+):
+    """Session bootstrap endpoint for the frontend.
+    Returns the current user if authenticated, or 401/403.
+    """
+    try:
+        user = verify_token(request, credentials)
+    except HTTPException:
+        raise
+    # Normalise the user dict shape (SSO path returns name; JWT path may not)
+    return {
+        "user": {
+            "id":    user.get("user_id") or user.get("id", ""),
+            "name":  user.get("name", ""),
+            "email": user.get("email", ""),
+            "role":  user.get("role", ""),
+        }
+    }
+
 @app.post("/api/auth/login")
 def login(request: LoginRequest):
+    if not ALLOW_LOCAL_LOGIN:
+        raise HTTPException(status_code=403, detail="Local login is disabled. Please sign in via the central portal.")
     if not db_pool:
         raise HTTPException(status_code=500, detail="Database not connected")
     

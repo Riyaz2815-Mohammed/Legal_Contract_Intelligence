@@ -11,9 +11,6 @@ except (OSError, ImportError):
     _nlp = None
 
 
-# ──────────────────────────────────────────────────────────────────────────────
-# Structural parsing helpers
-# ──────────────────────────────────────────────────────────────────────────────
 
 def is_mostly_title_case(text: str) -> bool:
     """

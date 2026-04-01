@@ -1,6 +1,5 @@
 import './FromLegalTable.css';
-
-const API_URL = 'http://localhost:8000';
+import { apiFetch } from '../utils/api';
 
 function FromLegalTable({ contracts, loading, onAccept, onReject }) {
     const formatFileSize = (bytes) => {
@@ -26,26 +25,10 @@ function FromLegalTable({ contracts, loading, onAccept, onReject }) {
 
     const handleDownload = async (contractId) => {
         try {
-            const token = localStorage.getItem('token');
-            // Enhanced download logic with activity recording on backend
-            const res = await fetch(`${API_URL}/api/contracts/download/${contractId}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await apiFetch(`/api/contracts/download/${contractId}`);
             const data = await res.json();
             if (data.download_url) {
                 window.open(data.download_url, '_blank');
-            } else if (res.ok) {
-                // Handle direct file response
-                const blob = await (await fetch(`${API_URL}/api/contracts/download/${contractId}`, {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                })).blob();
-                const url = window.URL.createObjectURL(blob);
-                const link = document.createElement('a');
-                link.href = url;
-                link.setAttribute('download', contractId);
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
             } else {
                 alert('Download failed: ' + (data.detail || 'Not Found'));
             }

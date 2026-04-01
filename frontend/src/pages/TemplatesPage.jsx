@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Layout from '../layouts/Layout';
 import './TemplatesPage.css';
-
-const API_URL = 'http://localhost:8000';
+import { apiFetch } from '../utils/api';
 
 const TemplatesPage = ({ user, onLogout }) => {
     const [templates, setTemplates] = useState([]);
@@ -18,10 +17,7 @@ const TemplatesPage = ({ user, onLogout }) => {
 
     const loadTemplates = async () => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/templates/list`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await apiFetch('/api/templates/list');
             const data = await res.json();
             if (res.ok) {
                 setTemplates(data.templates || []);
@@ -41,15 +37,14 @@ const TemplatesPage = ({ user, onLogout }) => {
         if (!file) return;
         setUploading(type);
         try {
-            const token = localStorage.getItem('token');
             const formData = new FormData();
             formData.append('file', file);
             formData.append('template_type', type);
 
-            const res = await fetch(`${API_URL}/api/templates/upload`, {
+            const res = await apiFetch('/api/templates/upload', {
                 method: 'POST',
-                headers: { 'Authorization': `Bearer ${token}` },
-                body: formData
+                headers: {},
+                body: formData,
             });
 
             if (res.ok) {
@@ -76,10 +71,7 @@ const TemplatesPage = ({ user, onLogout }) => {
 
     const handleDownloadRequest = async (templateId) => {
         try {
-            const token = localStorage.getItem('token');
-            const res = await fetch(`${API_URL}/api/templates/download/${templateId}`, {
-                headers: { 'Authorization': `Bearer ${token}` }
-            });
+            const res = await apiFetch('/api/templates/download/${templateId}');
             const data = await res.json();
             if (data.download_url) {
                 window.open(data.download_url, '_blank');

@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import Modal from './Modal';
 import './ClientForm.css';
-
-const API_URL = 'http://localhost:8000';
+import { apiFetch } from '../utils/api';
 
 function ClientForm({ onClientCreated }) {
     const [name, setName] = useState('');
@@ -17,14 +16,9 @@ function ClientForm({ onClientCreated }) {
         setAlert(null);
 
         try {
-            const token = localStorage.getItem('token');
-            const response = await fetch(`${API_URL}/api/clients/create`, {
+            const response = await apiFetch('/api/clients/create', {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({ name, email })
+                body: JSON.stringify({ name, email }),
             });
 
             const data = await response.json();
